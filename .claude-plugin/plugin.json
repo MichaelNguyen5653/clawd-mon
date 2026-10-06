@@ -1,0 +1,30 @@
+{
+  "name": "clawd-mon",
+  "version": "0.1.0",
+  "description": "A Pokemon companion above the prompt. Hatches from an egg and levels on tokens you spend; Evolve compacts the context and banks the XP.",
+  "author": {
+    "name": "Clawd-mon contributors"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "xpRate": {
+      "type": "number",
+      "title": "XP per 1,000 tokens",
+      "description": "How much XP 1,000 processed tokens bank as pending.",
+      "default": 1
+    },
+    "recommendPercent": {
+      "type": "number",
+      "title": "Recommend compact at (%)",
+      "description": "Context percent at which Evolve is recommended.",
+      "default": 60
+    },
+    "dangerPercent": {
+      "type": "number",
+      "title": "Decay above (%)",
+      "description": "Context percent at or above which pending XP loses 2% per turn.",
+      "default": 80
+    }
+  }
+}

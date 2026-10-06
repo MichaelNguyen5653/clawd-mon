@@ -1,0 +1,14 @@
+{
+  "name": "clawd-mon",
+  "description": "Clawd-mon: a Pokemon companion for the Claude Code prompt band.",
+  "owner": {
+    "name": "Clawd-mon contributors"
+  },
+  "plugins": [
+    {
+      "name": "clawd-mon",
+      "source": "./",
+      "description": "A Pokemon companion above the prompt. Hatches from an egg and levels on tokens you spend; Evolve compacts the context and banks the XP."
+    }
+  ]
+}
