@@ -237,11 +237,14 @@ describe('legendary star and dex text', () => {
 
   test('dex rows respect the row budget: header first, the rest truncated, never empty', async () => {
     const v = view()
-    expect(dexRows(v, 10)).toHaveLength(5)
+    expect(dexRows(v, 10)).toHaveLength(6)
     expect(dexRows(v, 10)[0]).toMatch(/^Dex 0\/\d+ · ★ 0\/4$/)
-    expect(dexRows(v, 3)).toHaveLength(3)
-    expect(dexRows(v, 1)).toHaveLength(1)
-    expect(dexRows(v, 0)).toHaveLength(1)
+    expect(dexRows(v, 10)[1]).toMatch(/^Starters 0\/\d+ · Common 0\/\d+$/)
+    expect(dexRows(v, 4)).toHaveLength(4)
+    // header and the counts line always stay
+    expect(dexRows(v, 1)).toHaveLength(2)
+    expect(dexRows(v, 0)).toHaveLength(2)
+    expect(dexRows(v, 2)[1]).toMatch(/^Starters/)
   })
 
   test('the silhouette is a black fill of the same cropped sprite and stays small', async () => {

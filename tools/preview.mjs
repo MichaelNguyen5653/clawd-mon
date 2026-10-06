@@ -238,12 +238,12 @@ function dexHtml(save, label) {
       return `<div class="band dexrow"><div class="spr sm">${svg}</div><div class="info"><div class="title">${esc((r.earned ? '★ ' : '') + r.name)}</div><div class="sub">${esc(r.lore)}</div><div class="sub" style="opacity:1">${esc(r.goal)}</div><div class="bar"><i style="width:${Math.round(Math.min(1, frac) * 100)}%;background:${r.earned ? GREEN : '#E0A030'}"></i></div><div class="sub">${esc(state)}</div></div></div>`
     })
     .join('')
-  return `<div class="help dexhelp">${label ? `<div class="lbl">${esc(label)}</div>` : ''}<div class="title">${esc(dexRows(v, 1)[0])}</div>${rows}<button>Cancel</button></div>`
+  return `<div class="help dexhelp">${label ? `<div class="lbl">${esc(label)}</div>` : ''}<div class="title">${esc(dexRows(v, 2)[0])}</div><div class="sub">${esc(dexRows(v, 2)[1])}</div>${rows}<button>Cancel</button></div>`
 }
 
 const mixed = {
   ...mon(2, 22, { compacts: 3 }),
-  dex: [1, 2, 4, 5, 25, 133, 143],
+  dex: [1, 2, 4, 16, 25, 133, 143], // 3 starters, 4 common
   streaks: { coolDays: 9, coolDay: '2026-10-05', coolBroken: false, strike: 17 },
   lifetime: { ...newSave().lifetime, fullLines: 1 },
   legendsEarned: [],
@@ -254,7 +254,7 @@ const dexCards = [
   { n: 'p', caption: 'Dex view, mixed progress: silhouettes and ??? until earned; Mewtwo locked behind the birds; nothing else is listed.', save: mixed },
   { n: 'q', caption: 'Dex view, Zapdos earned: real sprite, name and star; the rest still silhouettes.', save: oneEarned },
 ]
-const dexTerminal = s => dexRows(dexView(s, dex, cfg), 7).join('\n') + '\n[ Cancel ]'
+const dexTerminal = s => dexRows(dexView(s, dex, cfg), 8).join('\n') + '\n[ Cancel ]'
 
 const letters = 'abcdefghijklmnopqrstuvwxyz'
 const cards = SCENARIOS.map((s, i) => {

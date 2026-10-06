@@ -605,7 +605,8 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column" width="100%" gap={1}>
           {row}
-          <Text bold>{dexRows(dexData, 1)[0]}</Text>
+          <Text bold>{dexRows(dexData, 2)[0]}</Text>
+          <Text dimColor>{dexRows(dexData, 2)[1]}</Text>
           {dexData.rows.map((r, i) => {
             const b64 = sprites[i]
             const state = r.earned ? 'earned' : r.locked ? 'locked' : `${r.progress?.n ?? 0}/${r.progress?.goal ?? 0}`

@@ -1030,6 +1030,27 @@ describe('dex', () => {
     expect(withMew.rows.map(r => r.id)).toEqual([144, 145, 146, 150, 151])
   })
 
+  test('counts: starters (ids 1-9) and common species, legendaries in neither', async () => {
+    const view = (extra: Record<string, unknown>) => dexView(caught([], extra), DEX, CFG)
+    const v = view({ dex: [1, 2, 4, 25, 133, 63, 144, 150] })
+    expect(v.starters).toEqual({ n: 3, total: 4 }) // fixture species with ids 1-9: 1, 2, 3, 4
+    expect(v.common).toEqual({ n: 3, total: DEX.species.filter(s => s.id > 9 && !s.legendary).length })
+    expect(v.caught).toBe(8) // the header still counts everything caught
+    const none = view({})
+    expect(none.starters.n).toBe(0)
+    expect(none.common.n).toBe(0)
+    expect(view({ dex: [144, 145, 146, 150, 151] }).common.n).toBe(0)
+    expect(view({ dex: [3] }).starters.n).toBe(1)
+  })
+
+  test('dex text: header, then the counts line, then the legendary rows', async () => {
+    const text = execute(caught([1, 2, 25, 133]), DEX, 'dex', { day: DAY, rng: () => 0 }).text.split('\n')
+    expect(text[0]).toMatch(/^Dex 4\/\d+ · ★ 0\/4$/)
+    expect(text[1]).toMatch(/^Starters 2\/\d+ · Common 2\/\d+$/)
+    expect(text[2]).toMatch(/^\?\?\? · Frozen bird of legend/)
+    expect(text.join('\n')).not.toMatch(/Bulbasaur|Pikachu/) // numbers only, no species rows
+  })
+
   test('rows: unknown names until earned, progress and locked states', async () => {
     const s = caught([], {
       streaks: { coolDays: 3, coolDay: '2026-10-03', coolBroken: false, strike: 12 },

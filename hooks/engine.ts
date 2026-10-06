@@ -93,6 +93,8 @@ export const MOLTRES = 146
 export const MEWTWO = 150
 export const MEW = 151
 const BIRDS = [ARTICUNO, ZAPDOS, MOLTRES] as const
+/** The starter lines (Bulbasaur, Charmander, Squirtle) are species 1-9. */
+export const STARTER_MAX_ID = 9
 const HISTORY_DAYS = 14
 const GROWTH_SAMPLES = 5
 const PROJECT_TURNS = 3
@@ -769,6 +771,10 @@ export type DexView = {
   total: number
   legendsOwned: number
   legendsTotal: number
+  /** Species ids 1-9 caught, of all of them. */
+  starters: { n: number; total: number }
+  /** Every other non-legendary species caught, of all of them. */
+  common: { n: number; total: number }
   rows: DexRow[]
 }
 
@@ -797,13 +803,24 @@ export function dexView(save: Save, dex: Dex, cfg: Pick<Config, 'dangerPercent'>
   if (has(MEW)) {
     rows.push({ id: MEW, earned: true, name: name(MEW), lore: 'The one nobody listed', goal: 'Found', locked: false, progress: null })
   }
+  const isLegend = (id: number) => find(dex, id)?.legendary === true
+  const isStarter = (id: number) => id >= 1 && id <= STARTER_MAX_ID
+  const kind = (id: number) => (isLegend(id) ? 'legend' : isStarter(id) ? 'starter' : 'common')
+  const count = (k: string) => save.dex.filter(id => kind(id) === k).length
+  const total = (k: string) => dex.species.filter(sp => kind(sp.id) === k).length
   return {
+    starters: { n: count('starter'), total: total('starter') },
+    common: { n: count('common'), total: total('common') },
     caught: save.dex.length,
     total: dex.species.length,
     legendsOwned: [...BIRDS, MEWTWO, MEW].filter(has).length,
     legendsTotal: has(MEW) ? 5 : 4,
     rows,
   }
+}
+
+export function dexCounts(v: DexView): string {
+  return `Starters ${v.starters.n}/${v.starters.total} · Common ${v.common.n}/${v.common.total}`
 }
 
 export function dexHeader(v: DexView): string {
@@ -817,7 +834,7 @@ export function dexText(save: Save, dex: Dex, cfg: Pick<Config, 'dangerPercent'>
     const state = r.earned ? 'earned' : r.locked ? 'locked' : `${r.progress!.n}/${r.progress!.goal}`
     return `${r.earned ? '★ ' : ''}${r.name} · ${r.lore} · ${r.goal} · ${state}`
   })
-  return [dexHeader(v), ...rows].join('\n')
+  return [dexHeader(v), dexCounts(v), ...rows].join('\n')
 }
 
 // ---------- projection ----------

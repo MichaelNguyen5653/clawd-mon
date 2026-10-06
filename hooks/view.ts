@@ -176,10 +176,11 @@ export function dexRowLine(r: DexRow): string {
   return `${r.earned ? '★ ' : ''}${r.name} · ${r.lore} · ${r.goal} · ${state}`
 }
 
-/** Header row, then as many legendary rows as fit in `budget` rows (at least the header). */
+/** Header and counts line, then as many legendary rows as fit in `budget` rows (the first two always stay). */
 export function dexRows(v: DexView, budget: number): string[] {
   const header = `Dex ${v.caught}/${v.total} · ★ ${v.legendsOwned}/${v.legendsTotal}`
-  return [header, ...v.rows.map(dexRowLine)].slice(0, Math.max(1, budget))
+  const counts = `Starters ${v.starters.n}/${v.starters.total} · Common ${v.common.n}/${v.common.total}`
+  return [header, counts, ...v.rows.map(dexRowLine)].slice(0, Math.max(2, budget))
 }
 
 // ---------- sprite ----------

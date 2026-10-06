@@ -48,7 +48,7 @@ Evolve is a no-op with a toast while a turn runs. Evolution is checked at compac
 
 - `show` / `hide`: band on/off. × on the band = hide.
 - `hint`: open the in-band help (same as the `!hint` button; Cancel closes it).
-- `dex`: the catalog in the band (same Cancel as `!hint`; opening one closes the other). Header `Dex n/151 · ★ n/4`, one row per legendary: silhouette and `???` until earned, lore line, goal, progress or `locked`.
+- `dex`: the catalog in the band (same Cancel as `!hint`; opening one closes the other). Header `Dex n/151 · ★ n/4`, then a counts line `Starters n/9 · Common n/137` (numbers only: ids 1–9, and every other non-legendary), then one row per legendary: silhouette and `???` until earned, lore line, goal, progress or `locked`.
 - `status`: active entry, evolution gates, days to next evolution (Pokémon only, recent daily pace), box size, egg progress N/25, lifetime totals.
 - `box`: list entries: number, active marker, name or Egg, level.
 - `switch <name|#>`: make an entry active. Free, no confirm.
