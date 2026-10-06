@@ -31,11 +31,11 @@ const COMMAND = {
 const BOUNDS = { '1': [28, 30, 35, 33], egg: [34, 34, 28, 30] }
 const MESSAGES = [{ role: 'user' as const, text: 'hello', toolUses: [] }]
 
-type Counters = { compacts: number; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown> }
+type Counters = { compacts: number; queuedCompacts: number; runQueued?: boolean; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown> }
 
 /** The engine beneath the plugin: fixed usage, the data files, a sprite, a compact that works. */
-function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: boolean; compactRejects?: string } = {}): Counters {
-  const seen: Counters = { compacts: 0, spriteReads: [], toasts: [], saveReads: 0, store: new Map() }
+function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: boolean; compactRejects?: string; headless?: boolean } = {}): Counters {
+  const seen: Counters = { compacts: 0, queuedCompacts: 0, spriteReads: [], toasts: [], saveReads: 0, store: new Map() }
   on('store.get', (_$, e) => {
     if (e.key === 'save') seen.onSaveRead?.(++seen.saveReads)
     return { value: seen.store.get(e.key) }
@@ -102,11 +102,19 @@ function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: b
     }
     throw new Error(`unexpected read ${e.path}`)
   })
+  // Headless (-p / SDK, the desktop Code tab): a plugin's own compact is refused; /compact is queued instead.
   on('session.compact', () => {
     if (options.compactRejects) throw new Error(options.compactRejects)
+    if (options.headless && !seen.runQueued) throw new Error('not available in a headless (-p / SDK) session yet')
     seen.compacts += 1
     return { messages: [{ role: 'user' as const, text: 'summary', toolUses: [] }] }
   })
+  if (options.headless) {
+    on('command.run', { command: 'compact' }, () => {
+      seen.queuedCompacts += 1
+      return {}
+    })
+  }
   on('ui.render', ($, e) => {
     const { Box } = $.ui.resolve(e)
     return Box({})
@@ -519,6 +527,27 @@ describe('band', () => {
     await ui.press({ key: 'evolve' })
     expect(seen.compacts).toBe(0)
     expect((seen.store.get('save') as Save).pending).toBe(1000)
+    await ui.unmount()
+  })
+
+  test('headless: Evolve falls back to a queued /compact and applies the bank once', async ($, on) => {
+    const seen = world(on, 62, { headless: true })
+    seen.store.set('save', mon(25, 0, { pending: 1000, compacts: 0 }))
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    await ui.press({ key: 'evolve' })
+    expect(seen.queuedCompacts).toBe(1)
+    expect(seen.compacts).toBe(0)
+    expect(seen.toasts.some(t => /could not compact/.test(t))).toBe(false)
+    expect((seen.store.get('save') as Save).pending).toBe(1000) // nothing applied until it runs
+    // The engine runs the queued /compact once idle: the session.compact hook applies the bank.
+    seen.runQueued = true
+    await $.session.compact({ trigger: 'manual', messages: MESSAGES })
+    expect(seen.compacts).toBe(1)
+    const saved = seen.store.get('save') as Save
+    expect(saved.pending).toBe(0)
+    expect(A(saved).xp).toBe(1000)
+    expect(saved.lifetime.compacts).toBe(1) // applied once, not twice
     await ui.unmount()
   })
 

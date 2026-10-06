@@ -479,10 +479,17 @@ export const register: Register = (on, options) => {
           return
         }
       } catch (err) {
-        // Say why: the engine's reason is the only clue to a refusal (a turn running, a bad state)
-        const why = (err instanceof Error ? err.message : String(err)).trim().slice(0, 200)
-        $.ui.toast(`Clawd-mon: could not compact right now${why ? ` (${why})` : ''}.`)
-        return
+        // Headless (-p / SDK, the desktop Code tab) refuses a plugin's own compact; a queued /compact
+        // still runs there. The session.compact hook applies the bank when it does, so not here.
+        try {
+          await $.command.run({ command: 'compact' })
+          return
+        } catch {
+          // Say why: the engine's reason is the only clue to a refusal (a turn running, a bad state)
+          const why = (err instanceof Error ? err.message : String(err)).trim().slice(0, 200)
+          $.ui.toast(`Clawd-mon: could not compact right now${why ? ` (${why})` : ''}.`)
+          return
+        }
       }
       if (appliedByHook === seenBefore) await applyFinishedCompact($, 'plugin', percent)
     }
