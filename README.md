@@ -32,7 +32,8 @@ Needs a Claude Code build with function hooks (plugin `modules`). Desktop draws 
 | Decay | Context ≥ `dangerPercent` (80): pending −2% per completed turn |
 | Recommend | Context ≥ `recommendPercent` (60), or avg growth (last 5 turns) projects ≥ 80% within 3 turns |
 | Qualifying compact | Context ≥ 40% when it ran. Counts toward gates. Lower: XP still applies |
-| Egg | Species fixed when the egg is made: random first-stage non-legendary, hidden until hatch (only a `choose`n starter shows its name). Hatch level H = clamp(round(BST/60), 4, 10) (Caterpie 4, Bulbasaur 5, Mewtwo 10). Egg XP to hatch = 600 × H, on a 1.5 power curve. Two cracks on the way, then hatch; each stage needs a qualifying compact, max one stage per compact. Cracks show as lines on the egg. The band shows egg level and XP, never when the next stage comes. Hatches at Lv H |
+| Egg | Species fixed when the egg is made: random first-stage non-legendary, hidden until hatch (only a `choose`n starter shows its name). Roll by rarity tier: Starter 5%, Common 55%, Uncommon 30%, Rare 10%. Hatch level H = clamp(round(BST/60), 4, 10) (Caterpie 4, Bulbasaur 5, Mewtwo 10). Egg XP to hatch = 600 × H, on a 1.5 power curve. Two cracks on the way, then hatch; each stage needs a qualifying compact, max one stage per compact. Cracks show as lines on the egg. The band shows egg level and XP, never when the next stage comes. Hatches at Lv H |
+| Rarity | Per evolution line. Starter: ids 1–9 (9). Rare: gift/fossil/special lines, `RARE_ROOTS` (23). Uncommon: other lines whose strongest form has BST ≥ 490 (55). Common: the rest (59). Legendary: goals only (5). Hatched Pokémon show a colored tier banner beside the name; hatch toast names the tier |
 | Level | Species growth table (fast/medium/medium-slow/slow). Applied XP × clamp((320/BST)^0.35, 0.6, 1.1). Lv 1–100 |
 | Evolution | Level ≥ species level AND qualifying compacts since hatch: 3 (first), 8 (second). Item: Lv 30. Trade: Lv 36 |
 | Branches | Eevee etc.: first by default, `/clawd-mon branch <name>` picks |
@@ -48,7 +49,7 @@ Evolve is a no-op with a toast while a turn runs. Evolution is checked at compac
 
 - `show` / `hide`: band on/off. × on the band = hide.
 - `hint`: open the in-band help (same as the `!hint` button; Cancel closes it).
-- `dex`: the catalog in the band (same Cancel as `!hint`; opening one closes the other). Header `Dex n/151 · ★ n/4`, then a counts line `Starters n/9 · Common n/137` (numbers only: ids 1–9, and every other non-legendary), then one row per legendary: silhouette and `???` until earned, lore line, goal, progress or `locked`.
+- `dex`: the catalog in the band (same Cancel as `!hint`; opening one closes the other). Header `Dex n/151 · ★ n/4`, then a counts line `Starters n/9 · Common n/59 · Uncommon n/55 · Rare n/23` (all non-legendary species by tier), then one row per legendary: silhouette and `???` until earned, lore line, goal, progress or `locked`.
 - `status`: active entry, evolution gates, days to next evolution (Pokémon only, recent daily pace), box size, egg progress N/25, lifetime totals.
 - `box`: list entries: number, active marker, name or Egg, level.
 - `switch <name|#>`: make an entry active. Free, no confirm.

@@ -31,6 +31,9 @@ export type Species = {
   legendary: boolean
 }
 
+/** Tier of a species, shared by its whole evolution line. */
+export type Rarity = 'starter' | 'common' | 'uncommon' | 'rare' | 'legendary'
+
 export type Dex = {
   species: Species[]
   /** Cumulative XP by level: `growth[rate][level]` is the XP at which `level` starts. */
@@ -56,7 +59,7 @@ export type Save = ClawdMonSave
 export type GameEvent =
   | { kind: 'levelup'; level: number }
   | { kind: 'crack'; stage: number }
-  | { kind: 'hatch'; speciesId: number }
+  | { kind: 'hatch'; speciesId: number; rarity: Rarity }
   | { kind: 'evolve'; from: number; to: number }
   | { kind: 'egg'; origin: 'evolved' | 'milestone' | 'mastery' }
   | { kind: 'legend'; id: number }
@@ -95,6 +98,16 @@ export const MEW = 151
 const BIRDS = [ARTICUNO, ZAPDOS, MOLTRES] as const
 /** The starter lines (Bulbasaur, Charmander, Squirtle) are species 1-9. */
 export const STARTER_MAX_ID = 9
+/**
+ * First-stage species of the special lines (gifts, fossils, Safari Zone, Game Corner, one-offs):
+ * Hitmonlee, Hitmonchan, Chansey, Kangaskhan, Scyther, Pinsir, Tauros, Lapras, Ditto, Eevee,
+ * Porygon, Omanyte, Kabuto, Aerodactyl, Snorlax, Dratini. Their whole line is rare.
+ */
+export const RARE_ROOTS: readonly number[] = [106, 107, 113, 115, 123, 127, 128, 131, 132, 133, 137, 138, 140, 142, 143, 147]
+/** Any other non-starter line whose strongest form has at least this base stat total is uncommon. */
+export const UNCOMMON_LINE_BST = 490
+/** Relative odds of each tier when a random egg is rolled; a tier with no species drops out. */
+export const EGG_ODDS = { starter: 5, common: 55, uncommon: 30, rare: 10 } as const
 const HISTORY_DAYS = 14
 const GROWTH_SAMPLES = 5
 const PROJECT_TURNS = 3
@@ -365,13 +378,40 @@ function eggHatchLevel(entry: Entry, dex: Dex): number {
   return sp ? hatchLevel(sp) : DEFAULT_HATCH_LEVEL
 }
 
-function pickStarter(dex: Dex, rng: () => number): Species {
-  const pool = dex.species.filter(x => x.stage === 0 && !x.legendary)
-  const list = pool.length > 0 ? pool : dex.species
-  return list[Math.min(list.length - 1, Math.floor(rng() * list.length))]!
+function lineBst(dex: Dex, s: Species, depth = 0): number {
+  if (depth > 5) return bst(s)
+  const next = s.evolutions.map(e => find(dex, e.to)).filter((x): x is Species => x !== undefined)
+  return Math.max(bst(s), ...next.map(x => lineBst(dex, x, depth + 1)))
 }
 
-/** Every egg with no species yet gets a random first-stage non-legendary one, kept hidden. */
+/** The tier of a species: legendary, starter (ids 1-9), or by its line's first stage and strongest form. */
+export function rarity(dex: Dex, sp: Species): Rarity {
+  if (sp.legendary) return 'legendary'
+  if (sp.id >= 1 && sp.id <= STARTER_MAX_ID) return 'starter'
+  const r = root(dex, sp)
+  if (RARE_ROOTS.includes(r.id)) return 'rare'
+  return lineBst(dex, r) >= UNCOMMON_LINE_BST ? 'uncommon' : 'common'
+}
+
+/** A random first-stage non-legendary species: a tier by EGG_ODDS, then any species in it. One roll. */
+function pickStarter(dex: Dex, rng: () => number): Species {
+  const at = (list: Species[], f: number) => list[Math.min(list.length - 1, Math.max(0, Math.floor(f * list.length)))]!
+  const pool = dex.species.filter(x => x.stage === 0 && !x.legendary)
+  if (pool.length === 0) return at(dex.species, rng())
+  const tiers = (Object.keys(EGG_ODDS) as (keyof typeof EGG_ODDS)[])
+    .map(t => ({ w: EGG_ODDS[t], list: pool.filter(s => rarity(dex, s) === t) }))
+    .filter(x => x.w > 0 && x.list.length > 0)
+  if (tiers.length === 0) return at(pool, rng())
+  let roll = rng() * tiers.reduce((a, x) => a + x.w, 0)
+  const last = tiers.length - 1
+  for (const { w, list } of tiers.slice(0, last)) {
+    if (roll < w) return at(list, roll / w)
+    roll -= w
+  }
+  return at(tiers[last]!.list, roll / tiers[last]!.w)
+}
+
+/** Every egg with no species yet gets a random first-stage non-legendary one (tier by EGG_ODDS), kept hidden. */
 export function ensureTarget(save: Save, dex: Dex, rng: () => number = Math.random): Save {
   if (!save.box.some(e => e.phase === 'egg' && e.target === null)) return save
   return {
@@ -583,7 +623,7 @@ export function applyCompact(
         }
         hatched = 1
         newDex.push(sp.id)
-        events.push({ kind: 'hatch', speciesId: sp.id })
+        events.push({ kind: 'hatch', speciesId: sp.id, rarity: rarity(dex, sp) })
       } else {
         entry.eggStage = (entry.eggStage + 1) as 1 | 2
         events.push({ kind: 'crack', stage: entry.eggStage })
@@ -698,6 +738,8 @@ export type Progress =
       compacts: number
       next: { name: string; level: number; compactsNeeded: number } | null
       legendary: boolean
+      /** The tier banner shown once hatched. */
+      rarity: Rarity
     }
 
 function entryProgress(entry: Entry, pending: number, dex: Dex): Progress {
@@ -738,6 +780,7 @@ function entryProgress(entry: Entry, pending: number, dex: Dex): Progress {
     compacts: entry.compacts,
     next: next ? { name: next.to.name, level: next.level, compactsNeeded: next.compactsNeeded } : null,
     legendary: sp.legendary,
+    rarity: rarity(dex, sp),
   }
 }
 
@@ -773,8 +816,10 @@ export type DexView = {
   legendsTotal: number
   /** Species ids 1-9 caught, of all of them. */
   starters: { n: number; total: number }
-  /** Every other non-legendary species caught, of all of them. */
+  /** Non-starter, non-legendary species caught by tier (see `rarity`), of all of them. */
   common: { n: number; total: number }
+  uncommon: { n: number; total: number }
+  rare: { n: number; total: number }
   rows: DexRow[]
 }
 
@@ -803,14 +848,18 @@ export function dexView(save: Save, dex: Dex, cfg: Pick<Config, 'dangerPercent'>
   if (has(MEW)) {
     rows.push({ id: MEW, earned: true, name: name(MEW), lore: 'The one nobody listed', goal: 'Found', locked: false, progress: null })
   }
-  const isLegend = (id: number) => find(dex, id)?.legendary === true
-  const isStarter = (id: number) => id >= 1 && id <= STARTER_MAX_ID
-  const kind = (id: number) => (isLegend(id) ? 'legend' : isStarter(id) ? 'starter' : 'common')
-  const count = (k: string) => save.dex.filter(id => kind(id) === k).length
-  const total = (k: string) => dex.species.filter(sp => kind(sp.id) === k).length
+  const tally = (k: Rarity) => ({
+    n: save.dex.filter(id => {
+      const sp = find(dex, id)
+      return sp !== undefined && rarity(dex, sp) === k
+    }).length,
+    total: dex.species.filter(sp => rarity(dex, sp) === k).length,
+  })
   return {
-    starters: { n: count('starter'), total: total('starter') },
-    common: { n: count('common'), total: total('common') },
+    starters: tally('starter'),
+    common: tally('common'),
+    uncommon: tally('uncommon'),
+    rare: tally('rare'),
     caught: save.dex.length,
     total: dex.species.length,
     legendsOwned: [...BIRDS, MEWTWO, MEW].filter(has).length,
@@ -820,7 +869,10 @@ export function dexView(save: Save, dex: Dex, cfg: Pick<Config, 'dangerPercent'>
 }
 
 export function dexCounts(v: DexView): string {
-  return `Starters ${v.starters.n}/${v.starters.total} · Common ${v.common.n}/${v.common.total}`
+  return (
+    `Starters ${v.starters.n}/${v.starters.total} · Common ${v.common.n}/${v.common.total} · ` +
+    `Uncommon ${v.uncommon.n}/${v.uncommon.total} · Rare ${v.rare.n}/${v.rare.total}`
+  )
 }
 
 export function dexHeader(v: DexView): string {

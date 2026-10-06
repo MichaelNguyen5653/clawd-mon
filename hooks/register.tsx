@@ -40,8 +40,10 @@ import {
 import {
   AMBER,
   GREEN,
+  RARITY_COLOR,
   TRACK,
   adviceLine,
+  rarityLabel,
   dexRows,
   hintRows,
   milestoneLine,
@@ -510,6 +512,9 @@ export const register: Register = (on, options) => {
             <Box flexDirection="row" gap={2}>
               <Box flexGrow={1} flexDirection="row" gap={1}>
                 <Text bold wrap="truncate-end">{title}</Text>
+                {p.kind === 'mon' ? (
+                  <Text key="rarity" color={RARITY_COLOR[p.rarity]} bold>{`[${rarityLabel(p.rarity)}]`}</Text>
+                ) : null}
                 <Button key="hint" label="!hint" plain dimColor onPress={openHint} />
                 <Button key="dex" label="dex" plain dimColor onPress={openDex} />
                 <Text dimColor wrap="truncate-end">{milestone}</Text>
@@ -579,6 +584,11 @@ export const register: Register = (on, options) => {
         <Box flexDirection="column" flexGrow={1}>
           <Box flexDirection="row" alignItems="center" gap={1}>
             <Text bold>{title}</Text>
+            {p.kind === 'mon' ? (
+              <Box key="rarity" backgroundColor={RARITY_COLOR[p.rarity]}>
+                <Text color="#FFFFFF" bold>{` ${rarityLabel(p.rarity)} `}</Text>
+              </Box>
+            ) : null}
             <Button key="hint" label="!hint" plain dimColor onPress={openHint} />
             <Button key="dex" label="dex" plain dimColor onPress={openDex} />
             <Text dimColor>{milestone}</Text>
