@@ -168,6 +168,32 @@ describe('band', () => {
     await ui.unmount()
   })
 
+  test('a hatched mon shows its rarity banner on both surfaces', async ($, on) => {
+    const seen = world(on)
+    for (const [id, label] of [[1, 'Starter'], [133, 'Rare']] as const) {
+      seen.store.set('save', mon(id, 5000))
+      for (const surface of ['terminal', 'desktop'] as const) {
+        await $.session.start({ cwd: '.', surface, isInteractive: true })
+        const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+        const text = surface === 'terminal' ? new RegExp('^\\[' + label + '\\]$') : new RegExp('^ ' + label + ' $')
+        expect(await ui.find({ type: 'Text', text })).toBeDefined()
+        await ui.unmount()
+      }
+    }
+  })
+
+  test('an egg shows no rarity banner', async ($, on) => {
+    const seen = world(on)
+    seen.store.set('save', make({ target: 133, chosen: true, eggStage: 0, xp: 100 }))
+    for (const surface of ['terminal', 'desktop'] as const) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      expect(await ui.find({ type: 'Text', text: /Egg Lv/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /Starter|Common|Uncommon|Rare|Legendary/ })).toBeUndefined()
+      await ui.unmount()
+    }
+  })
+
   test('an egg shows its crack stage and the egg sprite', async ($, on) => {
     const seen = world(on)
     seen.store.set('save', make({ target: 1, chosen: true, eggStage: 1, xp: 900 }))
@@ -265,7 +291,7 @@ describe('band', () => {
       await $.command.run({ command: PLUGIN, args: 'dex', ...COMMAND })
       const row = (re: RegExp) => ui.find({ type: 'Text', text: re })
       expect(await row(/Dex 3\/\d+ · ★ 0\/4/)).toBeDefined()
-      expect(await row(/^Starters 3\/\d+ · Common 0\/\d+$/)).toBeDefined()
+      expect(await row(/^Starters 3\/\d+ · Common 0\/\d+ · Uncommon 0\/\d+ · Rare 0\/\d+$/)).toBeDefined()
       expect(await row(/\?\?\?/)).toBeDefined()
       expect(await row(/Frozen bird of legend/)).toBeDefined()
       expect(await row(/Stay cool: 14 days without reaching 80% context/)).toBeDefined()
@@ -316,7 +342,7 @@ describe('band', () => {
     await $.command.run({ command: PLUGIN, args: 'dex', ...COMMAND })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
     expect(await ui.find({ type: 'Text', text: /^Dex \d+\/\d+ · ★/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^Starters \d+\/\d+ · Common \d+\/\d+$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Starters \d+\/\d+ · Common \d+\/\d+ · Uncommon \d+\/\d+ · Rare \d+\/\d+$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Frozen bird of legend/ })).toBeUndefined()
     expect(await ui.find({ key: 'dex-cancel' })).toBeDefined()
     await ui.unmount()

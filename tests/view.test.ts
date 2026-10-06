@@ -13,6 +13,7 @@ import {
   contextLine,
   crackOverlay,
   eventToast,
+  rarityLabel,
   formatTokens,
   HINT_COMMANDS,
   hintRows,
@@ -86,10 +87,18 @@ describe('egg text gives no hints', () => {
   test('toasts are neutral for both cracks', async () => {
     expect(eventToast({ kind: 'crack', stage: 1 }, DEX)).toBe('The egg is cracking')
     expect(eventToast({ kind: 'crack', stage: 2 }, DEX)).toBe('The egg is cracking')
-    expect(eventToast({ kind: 'hatch', speciesId: 1 }, DEX)).toBe('The egg hatched: Bulbasaur!')
+    expect(eventToast({ kind: 'hatch', speciesId: 1, rarity: 'starter' }, DEX)).toBe('The egg hatched: Bulbasaur (Starter)!')
     expect(eventToast({ kind: 'evolve', from: 1, to: 2 }, DEX)).toBe('Bulbasaur evolved into Ivysaur!')
     expect(eventToast({ kind: 'egg', origin: 'evolved' }, DEX)).toBe('A new egg arrived — /clawd-mon switch to hatch it')
     expect(eventToast({ kind: 'egg', origin: 'milestone' }, DEX)).toBe('A new egg arrived — /clawd-mon switch to hatch it')
+  })
+
+  test('the hatch toast names the tier, and rarityLabel capitalises it', async () => {
+    expect(eventToast({ kind: 'hatch', speciesId: 133, rarity: 'rare' }, DEX)).toBe('The egg hatched: Eevee (Rare)!')
+    expect(eventToast({ kind: 'hatch', speciesId: 25, rarity: 'common' }, DEX)).toContain('(Common)')
+    expect((['starter', 'common', 'uncommon', 'rare', 'legendary'] as const).map(rarityLabel)).toEqual([
+      'Starter', 'Common', 'Uncommon', 'Rare', 'Legendary',
+    ])
   })
 
   test('a mon keeps its evolution line', async () => {
@@ -239,7 +248,7 @@ describe('legendary star and dex text', () => {
     const v = view()
     expect(dexRows(v, 10)).toHaveLength(6)
     expect(dexRows(v, 10)[0]).toMatch(/^Dex 0\/\d+ · ★ 0\/4$/)
-    expect(dexRows(v, 10)[1]).toMatch(/^Starters 0\/\d+ · Common 0\/\d+$/)
+    expect(dexRows(v, 10)[1]).toMatch(/^Starters 0\/\d+ · Common 0\/\d+ · Uncommon 0\/\d+ · Rare 0\/\d+$/)
     expect(dexRows(v, 4)).toHaveLength(4)
     // header and the counts line always stay
     expect(dexRows(v, 1)).toHaveLength(2)

@@ -2,12 +2,24 @@
 // so plain Node can load this file (tools/preview.mjs) as well as the plugin.
 
 import type { ClawdMonAgents, ClawdMonTools, ClawdMonUsage } from '../types'
-import type { Config, Dex, DexRow, DexView, GameEvent, Overview, Progress, Recommendation } from './engine'
+import type { Config, Dex, DexRow, DexView, GameEvent, Overview, Progress, Rarity, Recommendation } from './engine'
 
 export const GREEN = '#4CAF50'
 export const AMBER = '#E0A030'
 export const RED = '#E5534B'
 export const TRACK = '#80808040'
+/** Banner fill per tier; white text on each stays readable. */
+export const RARITY_COLOR: Record<Rarity, string> = {
+  starter: '#C2410C',
+  common: '#6B7280',
+  uncommon: '#2E7D32',
+  rare: '#1D4ED8',
+  legendary: '#A16207',
+}
+
+export function rarityLabel(r: Rarity): string {
+  return r[0]!.toUpperCase() + r.slice(1)
+}
 /** Sprite PNGs are drawn on a square canvas of this many pixels. */
 export const CANVAS_PX = 96
 
@@ -112,7 +124,7 @@ export function eventToast(ev: GameEvent, dex: Dex): string {
     case 'legend':
       return 'A legendary egg arrived ★ — /clawd-mon switch to hatch it'
     case 'hatch':
-      return `The egg hatched: ${name(ev.speciesId)}!`
+      return `The egg hatched: ${name(ev.speciesId)} (${rarityLabel(ev.rarity)})!`
     case 'evolve':
       return `${name(ev.from)} evolved into ${name(ev.to)}!`
   }
@@ -179,7 +191,9 @@ export function dexRowLine(r: DexRow): string {
 /** Header and counts line, then as many legendary rows as fit in `budget` rows (the first two always stay). */
 export function dexRows(v: DexView, budget: number): string[] {
   const header = `Dex ${v.caught}/${v.total} · ★ ${v.legendsOwned}/${v.legendsTotal}`
-  const counts = `Starters ${v.starters.n}/${v.starters.total} · Common ${v.common.n}/${v.common.total}`
+  const counts =
+    `Starters ${v.starters.n}/${v.starters.total} · Common ${v.common.n}/${v.common.total} · ` +
+    `Uncommon ${v.uncommon.n}/${v.uncommon.total} · Rare ${v.rare.n}/${v.rare.total}`
   return [header, counts, ...v.rows.map(dexRowLine)].slice(0, Math.max(2, budget))
 }
 

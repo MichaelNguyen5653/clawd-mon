@@ -20,10 +20,12 @@ import {
   overview,
   progress,
   recommendation,
+  rarity,
 } from '../hooks/engine.ts'
 import {
   GREEN,
   TRACK,
+  RARITY_COLOR,
   adviceLine,
   dexRows,
   eventToast,
@@ -32,6 +34,7 @@ import {
   contextColor,
   statsLine,
   pendingLine,
+  rarityLabel,
   spriteSvg,
   textBar,
   titleOf,
@@ -119,7 +122,7 @@ function desktopBand({ save, usage: u, label, hint = false }) {
   <div class="spr">${svg}</div>
   <div class="info">
     ${label ? `<div class="lbl">${esc(label)}</div>` : ''}
-    <div class="trow"><span class="title">${esc(titleOf(p))}</span><button class="hintbtn">!hint</button><span class="sub">${esc(milestoneLine(overview(save)))}</span></div>
+    <div class="trow"><span class="title">${esc(titleOf(p))}</span>${p.kind === 'mon' ? `<span class="rarity" style="background:${RARITY_COLOR[p.rarity]};color:#fff">${esc(` ${rarityLabel(p.rarity)} `)}</span>` : ''}<button class="hintbtn">!hint</button><span class="sub">${esc(milestoneLine(overview(save)))}</span></div>
     ${bar(p.fraction, GREEN)}
     <div class="sub">${esc(`${xpLine(p)} · ${pendingLine(p)}`)}</div>
     ${bar((u?.percent ?? 0) / 100, color)}
@@ -135,8 +138,9 @@ function terminalBand({ save, usage: u, hint = false, maxRows = 12 }) {
   const { p, rec } = view(save, u)
   const pad = ' '.repeat(10)
   const advice = adviceLine(rec, u, cfg)
+  const rarityText = p.kind === 'mon' ? ` [${rarityLabel(p.rarity)}]` : ''
   const rows = [
-    `┌────────┐  ${titleOf(p)} !hint  ${milestoneLine(overview(save))}   [ Evolve ] ×`,
+    `┌────────┐  ${titleOf(p)}${rarityText} !hint  ${milestoneLine(overview(save))}   [ Evolve ] ×`,
     `│ sprite │  ${textBar(p.fraction, 20)} ${xpLine(p)}`,
     `│  8x4   │  ${pendingLine(p)}`,
     `└────────┘  ${textBar((u?.percent ?? 0) / 100, 20)} ${stats(u)}`,
@@ -218,7 +222,7 @@ const textCards = [
   {
     n: 'o',
     caption: 'Toasts: a new egg, a crack (neutral), a hatch.',
-    text: [eventToast({ kind: 'egg', origin: 'evolved' }, dex), eventToast({ kind: 'crack', stage: 1 }, dex), eventToast({ kind: 'crack', stage: 2 }, dex), eventToast({ kind: 'hatch', speciesId: 1 }, dex)].join('\n'),
+    text: [eventToast({ kind: 'egg', origin: 'evolved' }, dex), eventToast({ kind: 'crack', stage: 1 }, dex), eventToast({ kind: 'crack', stage: 2 }, dex), eventToast({ kind: 'hatch', speciesId: 1, rarity: rarity(dex, species(1)) }, dex)].join('\n'),
   },
 ]
 
@@ -306,7 +310,7 @@ const html = `<!doctype html>
   .band { display: flex; align-items: center; gap: 14px; }
   .spr { width: 80px; height: 80px; flex: none; } .spr svg { display: block; }
   .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-  .lbl { font-size: 11px; opacity: .6; } .title { font-weight: 700; } .trow { display: flex; align-items: center; gap: 8px; }
+  .lbl { font-size: 11px; opacity: .6; } .title { font-weight: 700; } .trow { display: flex; align-items: center; gap: 8px; } .rarity { padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 700; }
   .hintbtn { border: 0; padding: 0; opacity: .55; font-size: 12px; } .help { font-size: 12px; opacity: .85; padding: 6px 0 0 94px; display: flex; flex-direction: column; gap: 2px; } .help button { align-self: flex-start; margin-top: 4px; } .dexhelp { padding: 8px 0 0 0; gap: 8px; } .dexrow { gap: 10px; } .spr.sm { width: 48px; height: 48px; }
   .bar { height: 6px; background: ${TRACK}; } .bar i { display: block; height: 100%; }
   .sub { opacity: .75; font-size: 12px; } .advice { color: #E0A030; font-weight: 700; font-size: 12px; }

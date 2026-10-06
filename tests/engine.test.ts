@@ -25,6 +25,8 @@ import {
   sanitizeSave,
   tokensToXp,
   dexView,
+  EGG_ODDS,
+  rarity,
   newEntry,
   observeTurn,
   type Entry,
@@ -341,7 +343,17 @@ describe('egg', () => {
     expect(A(r.save).eggStage).toBe(0)
     expect(A(r.save).chosen).toBe(false)
     expect(r.save.lifetime.hatches).toBe(1)
-    expect(r.events).toContainEqual({ kind: 'hatch', speciesId: 25 })
+    expect(r.events).toContainEqual({ kind: 'hatch', speciesId: 25, rarity: 'common' })
+  })
+
+  test('hatch event and progress carry the rarity of the species', async () => {
+    for (const [target, tier] of [[1, 'starter'], [25, 'common'], [63, 'uncommon'], [133, 'rare'], [150, 'legendary']] as const) {
+      const r = applyCompact(egg(6000, 2, { target }), DEX, qual, CFG)
+      expect(r.events).toContainEqual({ kind: 'hatch', speciesId: target, rarity: tier })
+      expect(progress(r.save, DEX)).toMatchObject({ kind: 'mon', rarity: tier })
+    }
+    expect(progress(egg(0), DEX).kind).toBe('egg')
+    expect(progress(egg(0), DEX)).not.toHaveProperty('rarity')
   })
 
   test('Mewtwo hatches at Lv 10', async () => {
@@ -1030,23 +1042,26 @@ describe('dex', () => {
     expect(withMew.rows.map(r => r.id)).toEqual([144, 145, 146, 150, 151])
   })
 
-  test('counts: starters (ids 1-9) and common species, legendaries in neither', async () => {
+  test('counts: each tier caught over its total, legendaries in none', async () => {
     const view = (extra: Record<string, unknown>) => dexView(caught([], extra), DEX, CFG)
     const v = view({ dex: [1, 2, 4, 25, 133, 63, 144, 150] })
     expect(v.starters).toEqual({ n: 3, total: 4 }) // fixture species with ids 1-9: 1, 2, 3, 4
-    expect(v.common).toEqual({ n: 3, total: DEX.species.filter(s => s.id > 9 && !s.legendary).length })
+    expect(v.common).toEqual({ n: 1, total: 3 }) // Pikachu line, Mr-mime
+    expect(v.uncommon).toEqual({ n: 1, total: 3 }) // Abra line
+    expect(v.rare).toEqual({ n: 1, total: 4 }) // Eevee line
     expect(v.caught).toBe(8) // the header still counts everything caught
     const none = view({})
-    expect(none.starters.n).toBe(0)
-    expect(none.common.n).toBe(0)
-    expect(view({ dex: [144, 145, 146, 150, 151] }).common.n).toBe(0)
+    for (const t of [none.starters, none.common, none.uncommon, none.rare]) expect(t.n).toBe(0)
+    const legends = view({ dex: [144, 145, 146, 150, 151] })
+    for (const t of [legends.starters, legends.common, legends.uncommon, legends.rare]) expect(t.n).toBe(0)
     expect(view({ dex: [3] }).starters.n).toBe(1)
+    expect(view({ dex: [26, 65, 134] })).toMatchObject({ common: { n: 1 }, uncommon: { n: 1 }, rare: { n: 1 } })
   })
 
   test('dex text: header, then the counts line, then the legendary rows', async () => {
     const text = execute(caught([1, 2, 25, 133]), DEX, 'dex', { day: DAY, rng: () => 0 }).text.split('\n')
     expect(text[0]).toMatch(/^Dex 4\/\d+ · ★ 0\/4$/)
-    expect(text[1]).toMatch(/^Starters 2\/\d+ · Common 2\/\d+$/)
+    expect(text[1]).toMatch(/^Starters 2\/\d+ · Common 1\/\d+ · Uncommon 0\/\d+ · Rare 1\/\d+$/)
     expect(text[2]).toMatch(/^\?\?\? · Frozen bird of legend/)
     expect(text.join('\n')).not.toMatch(/Bulbasaur|Pikachu/) // numbers only, no species rows
   })
@@ -1130,6 +1145,58 @@ describe('dex', () => {
   test('box and status show a star by legendary eggs and Pokémon', async () => {
     const s = withBox([hatched(1, 12), eggEntry({ id: 'a2', origin: 'legendary', target: 144 })], 'a1')
     expect(execute(s, DEX, 'box', { day: DAY }).text).toMatch(/2\.   Egg Lv 1 ★/)
+  })
+})
+
+describe('rarity and egg odds', () => {
+  test('rarity per tier, the whole line sharing it', async () => {
+    const tier = (id: number) => rarity(DEX, species(id))
+    for (const id of [1, 2, 3, 4]) expect(tier(id)).toBe('starter') // Venusaur too
+    for (const id of [25, 26, 122]) expect(tier(id)).toBe('common') // Raichu follows Pikachu; line BST 485 < 490
+    for (const id of [63, 64, 65]) expect(tier(id)).toBe('uncommon') // Alakazam; line BST 500
+    for (const id of [133, 134, 135, 136]) expect(tier(id)).toBe('rare') // Vaporeon follows Eevee
+    for (const id of [144, 145, 146, 150, 151]) expect(tier(id)).toBe('legendary') // Mew included
+  })
+
+  test('uncommon starts at a line BST of 490, and the strongest form counts', async () => {
+    const pika = species(25)
+    const raichu = species(26)
+    const stronger = (extra: number): typeof DEX => ({
+      ...DEX,
+      species: DEX.species.map(s => (s.id === 26 ? { ...s, stats: { ...raichu.stats, hp: raichu.stats.hp + extra } } : s)),
+    })
+    expect(rarity(stronger(4), pika)).toBe('common') // 489
+    expect(rarity(stronger(5), pika)).toBe('uncommon') // 490
+    expect(rarity(stronger(5), stronger(5).species.find(s => s.id === 26)!)).toBe('uncommon')
+  })
+
+  test('egg tiers follow EGG_ODDS, never legendary, never a later stage', async () => {
+    const N = 1000
+    const counts: Record<string, number> = { starter: 0, common: 0, uncommon: 0, rare: 0 }
+    for (let i = 0; i < N; i++) {
+      const r = i / N
+      const sp = species(A(ensureTarget(newSave(), DEX, () => r)).target!)
+      expect(sp.stage).toBe(0)
+      expect(sp.legendary).toBe(false)
+      counts[rarity(DEX, sp)]!++
+    }
+    const total = Object.values(EGG_ODDS).reduce((a, b) => a + b, 0)
+    for (const t of Object.keys(EGG_ODDS) as (keyof typeof EGG_ODDS)[]) {
+      expect(Math.abs(counts[t]! / N - EGG_ODDS[t] / total)).toBeLessThan(0.02)
+    }
+  })
+
+  test('within a tier every first-stage species can come up', async () => {
+    const seen = new Set<number>()
+    for (let i = 0; i < 1000; i++) seen.add(A(ensureTarget(newSave(), DEX, () => i / 1000)).target!)
+    expect([...seen].sort((a, b) => a - b)).toEqual([1, 4, 25, 63, 122, 133])
+  })
+
+  test('a dex with a single tier still hatches from it, at the rng extremes too', async () => {
+    const only = { ...DEX, species: DEX.species.filter(s => s.id === 25 || s.id === 26 || s.id === 122 || s.legendary) }
+    for (const r of [0, 0.5, 0.999999]) {
+      expect([25, 122]).toContain(A(ensureTarget(newSave(), only, () => r)).target!)
+    }
   })
 })
 
