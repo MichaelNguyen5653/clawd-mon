@@ -34,7 +34,7 @@ const MESSAGES = [{ role: 'user' as const, text: 'hello', toolUses: [] }]
 type Counters = { compacts: number; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown> }
 
 /** The engine beneath the plugin: fixed usage, the data files, a sprite, a compact that works. */
-function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: boolean } = {}): Counters {
+function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: boolean; compactRejects?: string } = {}): Counters {
   const seen: Counters = { compacts: 0, spriteReads: [], toasts: [], saveReads: 0, store: new Map() }
   on('store.get', (_$, e) => {
     if (e.key === 'save') seen.onSaveRead?.(++seen.saveReads)
@@ -103,6 +103,7 @@ function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: b
     throw new Error(`unexpected read ${e.path}`)
   })
   on('session.compact', () => {
+    if (options.compactRejects) throw new Error(options.compactRejects)
     seen.compacts += 1
     return { messages: [{ role: 'user' as const, text: 'summary', toolUses: [] }] }
   })
@@ -517,6 +518,19 @@ describe('band', () => {
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...WORKING })
     await ui.press({ key: 'evolve' })
     expect(seen.compacts).toBe(0)
+    expect((seen.store.get('save') as Save).pending).toBe(1000)
+    await ui.unmount()
+  })
+
+  test('a refused compact says why and keeps the bank', async ($, on) => {
+    const seen = world(on, 62, { compactRejects: 'a turn is running' })
+    seen.store.set('save', mon(25, 0, { pending: 1000 }))
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    await ui.press({ key: 'evolve' })
+    // The engine skips a throwing hook, so the rejection the plugin sees is whatever the chain ends in;
+    // what matters is that its reason reaches the toast instead of being swallowed.
+    expect(seen.toasts.some(t => /^Clawd-mon: could not compact right now \(.+\)\.$/.test(t))).toBe(true)
     expect((seen.store.get('save') as Save).pending).toBe(1000)
     await ui.unmount()
   })

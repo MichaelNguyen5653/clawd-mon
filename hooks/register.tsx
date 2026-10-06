@@ -478,8 +478,10 @@ export const register: Register = (on, options) => {
           $.ui.toast(`Clawd-mon: compact skipped (${result.skip})`)
           return
         }
-      } catch {
-        $.ui.toast('Clawd-mon: could not compact right now.')
+      } catch (err) {
+        // Say why: the engine's reason is the only clue to a refusal (a turn running, a bad state)
+        const why = (err instanceof Error ? err.message : String(err)).trim().slice(0, 200)
+        $.ui.toast(`Clawd-mon: could not compact right now${why ? ` (${why})` : ''}.`)
         return
       }
       if (appliedByHook === seenBefore) await applyFinishedCompact($, 'plugin', percent)
