@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { newSave, type Save } from '../hooks/engine'
+import { activeEntry, newEntry, newSave, type Entry, type Save } from '../hooks/engine'
 import { GROWTH, SPECIES } from './fixtures'
 
 const PLUGIN = 'clawd-mon'
@@ -28,12 +28,13 @@ const COMMAND = {
   presentation: { isFullscreen: true, columns: 120 },
 } as const
 
+const BOUNDS = { '1': [28, 30, 35, 33], egg: [34, 34, 28, 30] }
 const MESSAGES = [{ role: 'user' as const, text: 'hello', toolUses: [] }]
 
 type Counters = { compacts: number; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown> }
 
 /** The engine beneath the plugin: fixed usage, the data files, a sprite, a compact that works. */
-function world(on: On, percent = 62, options: { noSprites?: boolean } = {}): Counters {
+function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: boolean } = {}): Counters {
   const seen: Counters = { compacts: 0, spriteReads: [], toasts: [], saveReads: 0, store: new Map() }
   on('store.get', (_$, e) => {
     if (e.key === 'save') seen.onSaveRead?.(++seen.saveReads)
@@ -56,10 +57,44 @@ function world(on: On, percent = 62, options: { noSprites?: boolean } = {}): Cou
       rateLimits: [],
     },
   }))
+  on('tool.list', () => {
+    if (options.noLists) throw new Error('no tool list')
+    return {
+      value: [
+        { name: 'Read', description: 'reads', mcp: false },
+        { name: 'Bash', description: 'runs', mcp: false },
+        { name: 'mcp__srv__thing', description: 'thing', mcp: true },
+      ],
+    }
+  })
+  on('agent.list', () => {
+    if (options.noLists) throw new Error('no agent list')
+    return {
+      value: [
+        { id: 'a1', description: 'scan', type: 'Explore', status: 'running' },
+        { id: 'a2', description: 'plan', type: 'Plan', status: 'completed' },
+      ],
+    }
+  })
+  on('session.messages', () => ({
+    value: [
+      {
+        role: 'assistant',
+        text: '',
+        toolUses: [
+          { tool_use_id: 't1', tool: 'Bash', input: {} },
+          { tool_use_id: 't2', tool: 'Read', input: {} },
+          { tool_use_id: 't3', tool: 'Read', input: {} },
+        ],
+      },
+    ],
+  }))
+  on('tool.call', () => ({ result: { text: 'ok' } }))
   on('config.list', () => ({ value: [] }))
   on('fs.read', (_$, e) => {
     if (e.path.endsWith('pokedex.json')) return { value: JSON.stringify(SPECIES) }
     if (e.path.endsWith('growth.json')) return { value: JSON.stringify(GROWTH) }
+    if (e.path.endsWith('sprite-bounds.json')) return { value: JSON.stringify(BOUNDS) }
     if (e.path.endsWith('.png')) {
       if (options.noSprites) throw new Error('no such file')
       seen.spriteReads.push(e.path)
@@ -85,8 +120,24 @@ function world(on: On, percent = 62, options: { noSprites?: boolean } = {}): Cou
   return seen
 }
 
-function mon(id: number, xp: number, extra: Partial<Save> = {}): Save {
-  return { ...newSave(), phase: 'mon', speciesId: id, xp, ...extra }
+const A = activeEntry
+const ENTRY_KEYS = new Set(['phase', 'target', 'speciesId', 'chosen', 'xp', 'eggStage', 'compacts', 'branch', 'origin', 'eggClaimed'])
+
+/** A one-entry save; `extra` mixes entry and save fields. */
+function make(entry: Partial<Entry>, extra: Record<string, unknown> = {}): Save {
+  const base = newSave()
+  const saveExtra: Record<string, unknown> = {}
+  const entryExtra: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(extra)) (ENTRY_KEYS.has(k) ? entryExtra : saveExtra)[k] = v
+  return { ...base, ...saveExtra, box: [{ ...base.box[0]!, ...entry, ...entryExtra }] }
+}
+
+function mon(id: number, xp: number, extra: Record<string, unknown> = {}): Save {
+  return make({ phase: 'mon', speciesId: id, xp }, extra)
+}
+
+function hatchedEntry(id: string, speciesId: number, xp: number): Entry {
+  return { ...newEntry(id, 'starter'), phase: 'mon', speciesId, xp }
 }
 
 describe('band', () => {
@@ -119,12 +170,253 @@ describe('band', () => {
 
   test('an egg shows its crack stage and the egg sprite', async ($, on) => {
     const seen = world(on)
-    seen.store.set('save', { ...newSave(), eggStage: 1, xp: 900 })
+    seen.store.set('save', make({ target: 1, chosen: true, eggStage: 1, xp: 900 }))
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
-    expect(await ui.find({ type: 'Text', text: /Egg/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /1\/3/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Egg Lv 2 \(Bulbasaur\)/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\d\/3|crack|hatch at/i })).toBeUndefined()
     expect(seen.spriteReads.some(p => p.endsWith('egg.png'))).toBe(true)
+    await ui.unmount()
+  })
+
+  test('the context line shows real counts on both surfaces', async ($, on) => {
+    const seen = world(on, 62)
+    seen.store.set('save', mon(1, 5000))
+    for (const surface of ['desktop', 'terminal'] as const) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      expect(await ui.find({ type: 'Text', text: /Context 62% · 124K \/ 200K/ })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('the title row shows !hint, milestone progress, and the box size when it holds more than one', async ($, on) => {
+    const seen = world(on)
+    for (const surface of ['desktop', 'terminal'] as const) {
+      seen.store.set('save', { ...mon(1, 5000, { milestone: 24 }), box: [hatchedEntry('a1', 1, 5000), newEntry('a2', 'milestone', 4), newEntry('a3', 'milestone', 4)], activeId: 'a1' })
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      expect(await ui.find({ key: 'hint' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /New egg \(24\/25\) · Box 3/ })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('a single entry shows no box count', async ($, on) => {
+    const seen = world(on)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^New egg \(0\/25\)$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Box \d/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('!hint opens the help with the configured decay line, Cancel closes it, on both surfaces', async ($, on) => {
+    const seen = world(on, 20)
+    for (const surface of ['desktop', 'terminal'] as const) {
+      seen.store.set('save', mon(1, 5000))
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND, props: { ...BAND.props, maxRows: 40 } })
+      expect(await ui.find({ key: 'hint-cancel' })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /Evolve = compact/ })).toBeUndefined()
+      await ui.press({ key: 'hint' })
+      expect(await ui.find({ type: 'Text', text: /Evolve = compact \+ apply pending XP/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /decays 2%\/turn at 80%\+/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /\/clawd-mon switch <name\|#>/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /\/clawd-mon reset-all confirm/ })).toBeDefined()
+      expect(await ui.find({ key: 'hint-cancel' })).toBeDefined()
+      await ui.press({ key: 'hint-cancel' })
+      expect(await ui.find({ key: 'hint-cancel' })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /Evolve = compact/ })).toBeUndefined()
+      await ui.unmount()
+    }
+  })
+
+  test('/clawd-mon hint opens the help', async ($, on) => {
+    const seen = world(on, 20)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    await $.command.run({ command: PLUGIN, args: 'hint', ...COMMAND })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    expect(await ui.find({ key: 'hint-cancel' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('on a short terminal the commands collapse to one row and Cancel stays', async ($, on) => {
+    const seen = world(on, 20)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    await ui.press({ key: 'hint' })
+    expect(await ui.find({ key: 'hint-cancel' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Commands: show · hide · hint · dex · status · box/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\/clawd-mon switch <name\|#>:/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('the dex view opens from the command on both surfaces: header, legendary rows, Cancel; Mew unmentioned', async ($, on) => {
+    const seen = world(on, 20)
+    for (const surface of ['desktop', 'terminal'] as const) {
+      seen.store.set('save', mon(1, 5000, { dex: [1, 2, 3] }))
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND, props: { ...BAND.props, maxRows: 40 } })
+      expect(await ui.find({ key: 'dex-cancel' })).toBeUndefined()
+      await $.command.run({ command: PLUGIN, args: 'dex', ...COMMAND })
+      const row = (re: RegExp) => ui.find({ type: 'Text', text: re })
+      expect(await row(/Dex 3\/\d+ · ★ 0\/4/)).toBeDefined()
+      expect(await row(/\?\?\?/)).toBeDefined()
+      expect(await row(/Frozen bird of legend/)).toBeDefined()
+      expect(await row(/Stay cool: 14 days without reaching 80% context/)).toBeDefined()
+      expect(await row(/Born in a lab from a legend’s DNA/)).toBeDefined()
+      expect(await row(/Mew\b/)).toBeUndefined()
+      expect(await ui.find({ key: 'dex-cancel' })).toBeDefined()
+      await ui.press({ key: 'dex-cancel' })
+      expect(await ui.find({ key: 'dex-cancel' })).toBeUndefined()
+      await ui.unmount()
+    }
+  })
+
+  test('the dex and the help never open together: opening one closes the other', async ($, on) => {
+    const seen = world(on, 20)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    await ui.press({ key: 'hint' })
+    expect(await ui.find({ key: 'hint-cancel' })).toBeDefined()
+    await ui.press({ key: 'dex' })
+    expect(await ui.find({ key: 'dex-cancel' })).toBeDefined()
+    expect(await ui.find({ key: 'hint-cancel' })).toBeUndefined()
+    await ui.press({ key: 'hint' })
+    expect(await ui.find({ key: 'hint-cancel' })).toBeDefined()
+    expect(await ui.find({ key: 'dex-cancel' })).toBeUndefined()
+    await $.command.run({ command: PLUGIN, args: 'dex', ...COMMAND })
+    expect(await ui.find({ key: 'hint-cancel' })).toBeUndefined()
+    expect(await ui.find({ key: 'dex-cancel' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('an earned legendary shows its name and star; desktop draws a sprite for every row', async ($, on) => {
+    const seen = world(on, 20)
+    seen.store.set('save', mon(1, 5000, { legendsEarned: [145] }))
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    await $.command.run({ command: PLUGIN, args: 'dex', ...COMMAND })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND, props: { ...BAND.props, maxRows: 40 } })
+    expect(await ui.find({ type: 'Text', text: /★ Zapdos/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Dex 0\/\d+ · ★ 1\/4/ })).toBeDefined()
+    expect((await ui.findAll({ type: 'Svg' })).length).toBeGreaterThanOrEqual(5)
+    await ui.unmount()
+  })
+
+  test('on a short terminal the dex keeps its header and Cancel and drops rows', async ($, on) => {
+    const seen = world(on, 20)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    await $.command.run({ command: PLUGIN, args: 'dex', ...COMMAND })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^Dex \d+\/\d+ · ★/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Frozen bird of legend/ })).toBeUndefined()
+    expect(await ui.find({ key: 'dex-cancel' })).toBeDefined()
+    await ui.unmount()
+    const big = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND, props: { ...BAND.props, maxRows: 40 } })
+    expect(await big.find({ type: 'Text', text: /Frozen bird of legend/ })).toBeDefined()
+    await big.unmount()
+  })
+
+  test('a cool day streak that completes earns Articuno at turn.complete, with its toast', async ($, on) => {
+    const seen = world(on, 20)
+    seen.store.set('save', mon(25, 0, { streaks: { coolDays: 13, coolDay: '1969-12-31', coolBroken: false, strike: 0 } }))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' })
+    const saved = seen.store.get('save') as Save
+    expect(saved.legendsEarned).toEqual([144])
+    expect(saved.box.some(e => e.origin === 'legendary' && e.target === 144)).toBe(true)
+    expect(seen.toasts).toContain('A legendary egg arrived ★ — /clawd-mon switch to hatch it')
+  })
+
+  test('a turn at the danger percent breaks the cool streak', async ($, on) => {
+    const seen = world(on, 85)
+    seen.store.set('save', mon(25, 0, { streaks: { coolDays: 13, coolDay: '1969-12-31', coolBroken: false, strike: 0 } }))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' })
+    const saved = seen.store.get('save') as Save
+    expect(saved.streaks.coolDays).toBe(0)
+    expect(saved.legendsEarned).toEqual([])
+  })
+
+  test('the 30th strike compact earns Zapdos; an auto-compact resets it', async ($, on) => {
+    const seen = world(on, 70)
+    seen.store.set('save', mon(25, 0, { streaks: { coolDays: 0, coolDay: null, coolBroken: false, strike: 29 } }))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    await $.session.compact({ trigger: 'manual', messages: MESSAGES })
+    let saved = seen.store.get('save') as Save
+    expect(saved.legendsEarned).toEqual([145])
+    expect(seen.toasts).toContain('A legendary egg arrived ★ — /clawd-mon switch to hatch it')
+    await $.session.compact({ trigger: 'auto', messages: MESSAGES })
+    saved = seen.store.get('save') as Save
+    expect(saved.streaks.strike).toBe(0)
+  })
+
+  test('a legendary egg shows a star in the band title', async ($, on) => {
+    const seen = world(on, 20)
+    const base = make({}, {})
+    seen.store.set('save', { ...base, box: [{ ...base.box[0]!, origin: 'legendary', target: 144 }] })
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^Egg Lv 1 ★$/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('the stats line shows agents and tools, seeded from the transcript, on both surfaces', async ($, on) => {
+    const seen = world(on, 62)
+    seen.store.set('save', mon(1, 5000))
+    for (const surface of ['desktop', 'terminal'] as const) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      const line = /Context 62% · 124K \/ 200K · Agents 1 running · 2 spawned · Tools 3 avail \(1 MCP\) · 2 used · 3 calls/
+      expect(await ui.find({ type: 'Text', text: line })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('tool calls bump the call count and the distinct tools used', async ($, on) => {
+    const seen = world(on, 62)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    await $.tool.call({ tool: 'Grep', pattern: 'x' })
+    await $.tool.call({ tool: 'Read', file_path: 'a' })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /3 used · 5 calls/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('the transcript is seeded once, not again on the next session.start', async ($, on) => {
+    const seen = world(on, 62)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /2 used · 3 calls/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('agents and tools read n/a when the engine will not say', async ($, on) => {
+    const seen = world(on, 62, { noLists: true })
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /Agents n\/a · Tools n\/a avail/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a random egg stays a surprise: no species name, and the species is stored', async ($, on) => {
+    const seen = world(on)
+    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+    const stored = seen.store.get('save') as Save
+    expect(A(stored).target).not.toBeNull()
+    expect(A(stored).chosen).toBe(false)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^Egg Lv 1$/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -167,8 +459,8 @@ describe('band', () => {
       expect(seen.compacts).toBe(1)
       const saved = seen.store.get('save') as Save
       expect(saved.pending).toBe(0)
-      expect(saved.xp).toBe(1000)
-      expect(saved.compacts).toBe(1) // 62% context qualifies
+      expect(A(saved).xp).toBe(1000)
+      expect(A(saved).compacts).toBe(1) // 62% context qualifies
       expect(saved.lifetime.compacts).toBe(1) // applied once, not twice
       expect(seen.toasts.filter(x => /Level up/.test(x)).length).toBeLessThanOrEqual(1)
       await ui.unmount()
@@ -177,16 +469,16 @@ describe('band', () => {
 
   test('one Evolve press moves an egg at most one stage and applies once', async ($, on) => {
     const seen = world(on, 70)
-    seen.store.set('save', { ...newSave(), pending: 5000 })
+    seen.store.set('save', make({ target: 4 }, { pending: 5000 }))
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
     await ui.press({ key: 'evolve' })
     const saved = seen.store.get('save') as Save
     expect(seen.compacts).toBe(1)
-    expect(saved.eggStage).toBe(1)
+    expect(A(saved).eggStage).toBe(1)
     expect(saved.lifetime.compacts).toBe(1)
-    expect(saved.compacts).toBe(1)
-    expect(seen.toasts.filter(x => /cracked/.test(x))).toHaveLength(1)
+    expect(A(saved).compacts).toBe(1)
+    expect(seen.toasts.filter(x => x === 'The egg is cracking')).toHaveLength(1)
     await ui.unmount()
   })
 
@@ -254,7 +546,7 @@ describe('hooks', () => {
     })
     const saved = seen.store.get('save') as Save
     expect(saved.pending).toBe(2) // 2,000 new tokens; cache reads do not count
-    expect(saved.xp).toBe(0)
+    expect(A(saved).xp).toBe(0)
   })
 
   test('a turn at 80%+ context decays pending by 2%', async ($, on) => {
@@ -274,7 +566,7 @@ describe('hooks', () => {
     await $.session.compact({ trigger: 'manual', messages: MESSAGES })
     const saved = seen.store.get('save') as Save
     expect(saved.pending).toBe(0)
-    expect(saved.xp).toBe(400)
+    expect(A(saved).xp).toBe(400)
   })
 
   test('a plugin-trigger compact through the hook applies once', async ($, on) => {
@@ -283,7 +575,7 @@ describe('hooks', () => {
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
     await $.session.compact({ trigger: 'plugin', messages: MESSAGES })
     const saved = seen.store.get('save') as Save
-    expect(saved.xp).toBe(400)
+    expect(A(saved).xp).toBe(400)
     expect(saved.lifetime.compacts).toBe(1)
   })
 
@@ -294,7 +586,7 @@ describe('hooks', () => {
     await $.session.compact({ trigger: 'auto', messages: MESSAGES })
     const saved = seen.store.get('save') as Save
     expect(saved.pending).toBe(0)
-    expect(saved.xp).toBe(200)
+    expect(A(saved).xp).toBe(200)
   })
 
   test('a precompute applies nothing', async ($, on) => {
@@ -337,30 +629,71 @@ describe('hooks', () => {
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
     const ask = await $.command.run({ command: PLUGIN, args: 'reset-all', ...COMMAND })
     expect(ask.text).toMatch(/confirm/)
-    expect((seen.store.get('save') as Save).speciesId).toBe(3)
+    expect(A(seen.store.get('save') as Save).speciesId).toBe(3)
     const done = await $.command.run({ command: PLUGIN, args: 'reset-all confirm', ...COMMAND })
     expect(done.text).toMatch(/fresh/i)
     const after = seen.store.get('save') as Save | undefined
-    expect(after === undefined || after.phase === 'egg').toBe(true)
+    expect(after === undefined || A(after).phase === 'egg').toBe(true)
     expect(seen.store.get('isHidden')).toBeUndefined()
   })
 
-  test('reset keeps lifetime totals in the store', async ($, on) => {
+  test('release removes an entry and keeps the totals in the store', async ($, on) => {
     const seen = world(on)
-    const s = mon(3, 99_999)
-    seen.store.set('save', { ...s, lifetime: { tokens: 9, xp: 9, compacts: 9, hatches: 1, evolutions: 2 } })
+    seen.store.set('save', {
+      ...make({}, {}),
+      lifetime: { tokens: 9, xp: 9, compacts: 9, hatches: 1, evolutions: 2 },
+      box: [hatchedEntry('a1', 3, 99_999), hatchedEntry('a2', 25, 5000)],
+    })
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
-    await $.command.run({ command: PLUGIN, args: 'reset', ...COMMAND })
+    const ask = await $.command.run({ command: PLUGIN, args: 'release 1', ...COMMAND })
+    expect(ask.text).toMatch(/confirm/)
+    expect((seen.store.get('save') as Save).box).toHaveLength(2)
+    await $.command.run({ command: PLUGIN, args: 'release 1 confirm', ...COMMAND })
     const saved = seen.store.get('save') as Save
-    expect(saved.phase).toBe('egg')
+    expect(saved.box.map(e => e.id)).toEqual(['a2'])
+    expect(saved.activeId).toBe('a2')
     expect(saved.lifetime.evolutions).toBe(2)
+  })
+
+  test('switch changes who gains xp on the next compact', async ($, on) => {
+    const seen = world(on, 70)
+    seen.store.set('save', { ...make({}, { pending: 400 }), box: [hatchedEntry('a1', 25, 0), hatchedEntry('a2', 4, 0)] })
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    const r = await $.command.run({ command: PLUGIN, args: 'switch charmander', ...COMMAND })
+    expect(r.text).toMatch(/Active: Charmander/)
+    await $.session.compact({ trigger: 'manual', messages: MESSAGES })
+    const saved = seen.store.get('save') as Save
+    expect(saved.box[0]!.xp).toBe(0)
+    expect(saved.box[1]!.xp).toBeGreaterThan(0)
+  })
+
+  test('box command lists the entries', async ($, on) => {
+    const seen = world(on)
+    seen.store.set('save', { ...make({}, {}), box: [hatchedEntry('a1', 25, 5000), { ...newEntry('a2', 'milestone', 4) }] })
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    const r = await $.command.run({ command: PLUGIN, args: 'box', ...COMMAND })
+    expect(r.text).toMatch(/Box \(2\)/)
+    expect(r.text).toMatch(/1\. \* Pikachu Lv \d+/)
+    expect(r.text).toMatch(/2\.   Egg Lv 1/)
+  })
+
+  test('a milestone compact toasts the new egg and adds it to the box', async ($, on) => {
+    const seen = world(on, 70)
+    seen.store.set('save', mon(25, 0, { pending: 10, milestone: 24 }))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    await $.session.compact({ trigger: 'manual', messages: MESSAGES })
+    const saved = seen.store.get('save') as Save
+    expect(saved.box).toHaveLength(2)
+    expect(saved.milestone).toBe(0)
+    expect(saved.activeId).toBe(saved.box[0]!.id)
+    expect(seen.toasts).toContain('A new egg arrived — /clawd-mon switch to hatch it')
   })
 
   test('first run with an empty store starts an egg', async ($, on) => {
     const seen = world(on)
     await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
-    expect(await ui.find({ type: 'Text', text: /Egg/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Egg Lv 1/ })).toBeDefined()
     await ui.unmount()
   })
 })

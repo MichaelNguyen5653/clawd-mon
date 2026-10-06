@@ -36,6 +36,7 @@ export const SPECIES: Species[] = [
   mon(1, 'Bulbasaur', [45, 49, 49, 65, 65, 45], 0, null, [lvl(2, 16)]),
   mon(2, 'Ivysaur', [60, 62, 63, 80, 80, 60], 1, 1, [lvl(3, 32)]),
   mon(3, 'Venusaur', [80, 82, 83, 100, 100, 80], 2, 2, []),
+  mon(4, 'Charmander', [39, 52, 43, 60, 50, 65], 0, null, [lvl(5, 16)]),
   mon(25, 'Pikachu', [35, 55, 40, 50, 50, 90], 0, null, [item(26, 'thunder-stone')], 'medium'),
   mon(26, 'Raichu', [60, 90, 55, 90, 80, 110], 1, 25, [], 'medium'),
   mon(63, 'Abra', [25, 20, 15, 105, 55, 90], 0, null, [lvl(64, 16)]),
@@ -49,6 +50,10 @@ export const SPECIES: Species[] = [
   mon(134, 'Vaporeon', [130, 65, 60, 110, 95, 65], 1, 133, [], 'medium'),
   mon(135, 'Jolteon', [65, 65, 60, 110, 95, 130], 1, 133, [], 'medium'),
   mon(136, 'Flareon', [65, 130, 60, 95, 110, 65], 1, 133, [], 'medium'),
+  mon(144, 'Articuno', [90, 85, 100, 95, 125, 85], 0, null, [], 'slow', true),
+  mon(145, 'Zapdos', [90, 90, 85, 125, 90, 100], 0, null, [], 'slow', true),
+  mon(146, 'Moltres', [90, 100, 90, 125, 85, 90], 0, null, [], 'slow', true),
+  mon(151, 'Mew', [100, 100, 100, 100, 100, 100], 0, null, [], 'medium-slow', true),
   mon(150, 'Mewtwo', [106, 110, 90, 154, 90, 130], 0, null, [], 'slow', true),
   mon(122, 'Mr-mime', [40, 45, 65, 100, 120, 90], 0, null, [], 'medium'),
 ]

@@ -17,107 +17,64 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ClawdMonUsage } from '../types'
 import {
   applyCompact,
   bankTokens,
   configFrom,
   DEFAULT_CONFIG,
   decayPending,
+  dexView,
   execute,
-  newSave,
   observeContext,
+  observeTurn,
+  overview,
   progress,
   recommendation,
   sanitizeSave,
+  ensureTarget,
   type CompactTrigger,
   type Config,
   type Dex,
-  type GameEvent,
-  type Progress,
   type Save,
 } from './engine'
+import {
+  AMBER,
+  GREEN,
+  TRACK,
+  adviceLine,
+  dexRows,
+  hintRows,
+  milestoneLine,
+  contextColor,
+  statsLine,
+  eventToast,
+  pendingLine,
+  spriteSvg,
+  textBar,
+  titleOf,
+  xpLine,
+  type Box as SpriteBox,
+} from './view'
 
 const saveAtom = atom({ plugin: 'clawd-mon', key: 'save' } as const, null)
 const usageAtom = atom({ plugin: 'clawd-mon', key: 'usage' } as const, null)
 const hiddenAtom = atom({ plugin: 'clawd-mon', key: 'isHidden' } as const, false)
+const hintAtom = atom({ plugin: 'clawd-mon', key: 'hintOpen' } as const, false)
+const dexAtom = atom({ plugin: 'clawd-mon', key: 'dexOpen' } as const, false)
+const toolsAtom = atom({ plugin: 'clawd-mon', key: 'tools' } as const, {
+  available: null,
+  mcp: 0,
+  usedNames: [],
+  calls: 0,
+  seeded: false,
+})
+const agentsAtom = atom({ plugin: 'clawd-mon', key: 'agents' } as const, { running: null, total: null })
+const AGENT_TICK_MS = 4000
 
 const COMMAND = 'clawd-mon'
 const SAVE_KEY = 'save'
 const HIDDEN_KEY = 'isHidden'
-const GREEN = '#4CAF50'
-const AMBER = '#E0A030'
-const RED = '#E5534B'
-const TRACK = '#80808040'
-const SPRITE_PX = 64
-
-// ---------- pure helpers (exported for tests) ----------
-
-export function contextColor(percent: number | undefined, cfg: Config): string {
-  if (percent === undefined) return GREEN
-  if (percent >= cfg.dangerPercent) return RED
-  if (percent >= cfg.recommendPercent) return AMBER
-  return GREEN
-}
-
-export function textBar(fraction: number, width: number): string {
-  const filled = Math.round(Math.max(0, Math.min(1, fraction)) * width)
-  return '█'.repeat(filled) + '░'.repeat(width - filled)
-}
-
-export function titleOf(p: Progress): string {
-  if (p.kind === 'egg') {
-    const starter = p.targetName ? ` (${p.targetName})` : ''
-    return `Egg, crack ${p.stage}/${p.cracks}${starter}`
-  }
-  return `${p.name} Lv ${p.level}`
-}
-
-export function xpLine(p: Progress): string {
-  return p.kind === 'egg'
-    ? `XP ${Math.floor(p.xp)}/${p.nextXp}`
-    : `XP ${Math.floor(p.into)}/${Math.floor(p.need)}`
-}
-
-export function pendingLine(p: Progress): string {
-  const pending = `Pending +${Math.floor(p.pending)} XP`
-  if (p.kind === 'egg') return `${pending}, applied on compact`
-  if (!p.next) return `${pending}, fully evolved`
-  return `${pending}, ${p.compacts}/${p.next.compactsNeeded} compacts for ${p.next.name} (Lv ${p.next.level})`
-}
-
-export function contextLine(usage: ClawdMonUsage | null): string {
-  if (usage === null || usage.percent === undefined) return 'Context: no reading yet'
-  return `Context ${usage.percent}%`
-}
-
-export function eventToast(ev: GameEvent, dex: Dex): string {
-  const name = (id: number) => dex.species.find(s => s.id === id)?.name ?? `#${id}`
-  switch (ev.kind) {
-    case 'levelup':
-      return `Level up: Lv ${ev.level}`
-    case 'crack':
-      return `The egg cracked (${ev.stage}/3)`
-    case 'hatch':
-      return `The egg hatched: ${name(ev.speciesId)}!`
-    case 'evolve':
-      return `${name(ev.from)} evolved into ${name(ev.to)}!`
-  }
-}
-
-function spriteSvg(base64: string, animate: boolean): string {
-  const css = animate
-    ? `.bob{animation:bob 2.4s ease-in-out infinite}` +
-      `@keyframes bob{0%,100%{transform:translateY(3px)}50%{transform:translateY(0)}}` +
-      `@media (prefers-reduced-motion: reduce){.bob{animation:none}}`
-    : ''
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${SPRITE_PX}" height="${SPRITE_PX + 4}" viewBox="0 0 ${SPRITE_PX} ${SPRITE_PX + 4}">` +
-    `<style>${css}</style>` +
-    `<g class="bob"><image href="data:image/png;base64,${base64}" x="0" y="0" width="${SPRITE_PX}" height="${SPRITE_PX}" style="image-rendering:pixelated"/></g>` +
-    `</svg>`
-  )
-}
+const SPRITE_PX = 80
 
 // ---------- engine reads ----------
 
@@ -146,6 +103,19 @@ function loadDex($: EngineInterface): Promise<Dex> {
       })
   }
   return dexPromise
+}
+
+let boundsPromise: Promise<Record<string, SpriteBox>> | null = null
+
+/** Content boxes of the sprites (data/sprite-bounds.json); empty when the file is missing. */
+function loadBounds($: EngineInterface): Promise<Record<string, SpriteBox>> {
+  if (boundsPromise === null) {
+    boundsPromise = $.fs
+      .read(`${$.plugin.root}/data/sprite-bounds.json`)
+      .then(text => JSON.parse(text) as Record<string, SpriteBox>)
+      .catch(() => ({}) as Record<string, SpriteBox>)
+  }
+  return boundsPromise
 }
 
 const sprites = new Map<string, string | null>()
@@ -197,7 +167,7 @@ function exclusive<T>(work: () => Promise<T>): Promise<T> {
 }
 
 async function loadSave($: EngineInterface, dex: Dex): Promise<Save> {
-  return sanitizeSave(await $.store.get(SAVE_KEY), dex)
+  return ensureTarget(sanitizeSave(await $.store.get(SAVE_KEY), dex), dex)
 }
 
 async function commit($: EngineInterface, save: Save): Promise<void> {
@@ -243,6 +213,43 @@ async function refreshSave($: EngineInterface): Promise<void> {
   if (mine === null || mine.rev !== fresh.rev) await update($, saveAtom, () => fresh)
 }
 
+async function refreshTools($: EngineInterface): Promise<void> {
+  const list = await $.tool.list()
+  const mcp = list.filter(t => t.mcp).length
+  const prev = await read($, toolsAtom)
+  if (prev.available === list.length && prev.mcp === mcp) return
+  await update($, toolsAtom, t => ({ ...t, available: list.length, mcp }))
+}
+
+async function refreshAgents($: EngineInterface): Promise<void> {
+  const list = await $.agent.list()
+  const running = list.filter(a => a.status === 'running').length
+  const prev = await read($, agentsAtom)
+  if (prev.running === running && prev.total === list.length) return
+  await update($, agentsAtom, () => ({ running, total: list.length }))
+}
+
+/** Counts tool calls made before the mod loaded, from the main transcript, once. */
+async function seedTools($: EngineInterface): Promise<void> {
+  const tools = await read($, toolsAtom)
+  if (tools.seeded) return
+  const messages = await $.session.messages()
+  const names = new Set<string>(tools.usedNames)
+  let calls = 0
+  for (const m of messages) {
+    for (const use of m.toolUses) {
+      names.add(String(use.tool))
+      calls += 1
+    }
+  }
+  await update($, toolsAtom, t => ({
+    ...t,
+    usedNames: [...new Set([...t.usedNames, ...names])],
+    calls: t.calls + calls,
+    seeded: true,
+  }))
+}
+
 async function refreshUsage($: EngineInterface): Promise<void> {
   const { context } = await $.session.usage()
   await update($, usageAtom, () => ({
@@ -286,6 +293,16 @@ export const register: Register = (on, options) => {
     await quietly(
       (async () => {
         const dex = await loadDex($)
+        // Eggs without a species get a hidden one now, and every session then shares it.
+        const stored = sanitizeSave(await $.store.get(SAVE_KEY), dex)
+        const rawSave = await $.store.get(SAVE_KEY)
+        const rawEarned =
+          typeof rawSave === 'object' && rawSave !== null && Array.isArray((rawSave as { legendsEarned?: unknown }).legendsEarned)
+            ? (rawSave as { legendsEarned: unknown[] }).legendsEarned.length
+            : -1
+        if (ensureTarget(stored, dex) !== stored || stored.legendsEarned.length !== rawEarned) {
+          await mutate($, dex, fresh => ({ save: fresh, value: null }))
+        }
         const save = await loadSave($, dex)
         await update($, saveAtom, () => save)
         await update($, hiddenAtom, () => false)
@@ -293,6 +310,12 @@ export const register: Register = (on, options) => {
       })(),
     )
     await quietly(refreshUsage($))
+    await quietly(seedTools($))
+    await quietly(refreshTools($))
+    await quietly(refreshAgents($))
+    $.clock.every(AGENT_TICK_MS, () => {
+      void refreshAgents($).catch(() => undefined)
+    })
 
     return started
   })
@@ -304,10 +327,27 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  on('tool.call', async ($, e, next) => {
+    const name = String(e.tool)
+    await quietly(
+      update($, toolsAtom, t => ({
+        ...t,
+        calls: t.calls + 1,
+        usedNames: t.usedNames.includes(name) ? t.usedNames : [...t.usedNames, name],
+      })),
+    )
+    const ran = await next(e)
+    if (name === 'Agent' || name === 'Task') await quietly(refreshAgents($))
+    return ran
+  })
+
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    await quietly(refreshTools($))
+    await quietly(refreshAgents($))
     await quietly(
-      loadDex($).then(dex => mutate($, dex, async loaded => {
+      loadDex($).then(async dex => {
+        const events = await mutate($, dex, async loaded => {
         let save = loaded
         const isMain = e.agentId === undefined
         let ctxTokens: number | undefined
@@ -334,8 +374,11 @@ export const register: Register = (on, options) => {
           save = decayPending(save, percent, cfg)
           save = observeContext(save, ctxTokens)
         }
-        return { save, value: undefined }
-      })),
+        const found = isMain ? observeTurn(save, { day: await today($), percent }, dex, cfg) : { save, events: [] }
+        return { save: found.save, value: found.events }
+      })
+        for (const ev of events) $.ui.toast(eventToast(ev, dex))
+      }),
     )
     return done
   })
@@ -357,7 +400,7 @@ export const register: Register = (on, options) => {
     const dex = await loadDex($)
     const day = await today($)
     const result = await mutate($, dex, save => {
-      const r = execute(save, dex, e.args, { day })
+      const r = execute(save, dex, e.args, { day, cfg })
       return { save: r.save, value: r }
     })
     if (result.wipe) {
@@ -365,6 +408,14 @@ export const register: Register = (on, options) => {
       await update($, saveAtom, () => result.save)
       await update($, hiddenAtom, () => false)
       return { text: result.text }
+    }
+    if (result.hint) {
+      await update($, hintAtom, () => true)
+      await update($, dexAtom, () => false)
+    }
+    if (result.dex) {
+      await update($, dexAtom, () => true)
+      await update($, hintAtom, () => false)
     }
     if (result.hide) {
       await $.store.set(HIDDEN_KEY, true)
@@ -387,7 +438,8 @@ export const register: Register = (on, options) => {
       return next(e)
     }
     const stored = await read($, saveAtom)
-    const save = stored ?? sanitizeSave(await $.store.get(SAVE_KEY).catch(() => undefined), dex)
+    const save =
+      stored ?? ensureTarget(sanitizeSave(await $.store.get(SAVE_KEY).catch(() => undefined), dex), dex)
     const usage = await read($, usageAtom)
     const p = progress(save, dex)
     const rec = recommendation(
@@ -395,17 +447,17 @@ export const register: Register = (on, options) => {
       save,
       cfg,
     )
-    const sprite = await loadSprite($, p.kind === 'egg' ? 'egg' : p.id)
+    const spriteKey = p.kind === 'egg' ? 'egg' : p.id
+    const sprite = await loadSprite($, spriteKey)
+    const bounds = (await loadBounds($))[String(spriteKey)]
 
     const title = titleOf(p)
     const xp = xpLine(p)
     const pending = pendingLine(p)
-    const ctx = contextLine(usage)
-    const advice = rec.recommend
-      ? rec.reason === 'projected'
-        ? 'Evolve recommended: context is filling fast'
-        : `Evolve recommended: context at ${usage?.percent}%`
-      : ''
+    const tools = await read($, toolsAtom)
+    const agents = await read($, agentsAtom)
+    const ctx = statsLine(usage, tools, agents)
+    const advice = adviceLine(rec, usage, cfg)
     const isWorking = e.props.isWorking
     const hide = async () => {
       await update($, hiddenAtom, () => true)
@@ -431,19 +483,36 @@ export const register: Register = (on, options) => {
       if (appliedByHook === seenBefore) await applyFinishedCompact($, 'plugin', percent)
     }
     const barColor = contextColor(usage?.percent, cfg)
+    const hintOpen = await read($, hintAtom)
+    const dexOpen = await read($, dexAtom)
+    const openHint = async () => {
+      await update($, hintAtom, () => true)
+      await update($, dexAtom, () => false)
+    }
+    const closeHint = () => update($, hintAtom, () => false)
+    const openDex = async () => {
+      await update($, dexAtom, () => true)
+      await update($, hintAtom, () => false)
+    }
+    const closeDex = () => update($, dexAtom, () => false)
+    const dexData = dexOpen ? dexView(save, dex, cfg) : null
+    const milestone = milestoneLine(overview(save))
 
     if (e.surface === 'terminal') {
       const { Box, Text, Button, Image } = $.ui.resolve(e)
       const bar = (f: number) => textBar(f, 20)
-      return (
+      const band = (
         <Box flexDirection="row" gap={2}>
           {sprite ? (
             <Image key="sprite" source={{ png: sprite }} columns={8} rows={4} alt={title} />
           ) : null}
           <Box flexDirection="column" flexGrow={1}>
             <Box flexDirection="row" gap={2}>
-              <Box flexGrow={1}>
+              <Box flexGrow={1} flexDirection="row" gap={1}>
                 <Text bold wrap="truncate-end">{title}</Text>
+                <Button key="hint" label="!hint" plain dimColor onPress={openHint} />
+                <Button key="dex" label="dex" plain dimColor onPress={openDex} />
+                <Text dimColor wrap="truncate-end">{milestone}</Text>
               </Box>
               <Button
                 key="evolve"
@@ -455,11 +524,35 @@ export const register: Register = (on, options) => {
               />
               <Button key="hide" label="×" plain dimColor role="dismiss" onPress={hide} />
             </Box>
-            <Text color={GREEN}>{`${bar(p.kind === 'egg' ? p.fraction : p.fraction)} ${xp}`}</Text>
+            <Text color={GREEN}>{`${bar(p.fraction)} ${xp}`}</Text>
             <Text dimColor wrap="truncate-end">{pending}</Text>
             <Text color={barColor}>{`${bar((usage?.percent ?? 0) / 100)} ${ctx}`}</Text>
             {advice ? <Text color={AMBER} bold>{advice}</Text> : null}
           </Box>
+        </Box>
+      )
+      if (dexData) {
+        const budget = Math.max(1, e.props.maxRows - (advice ? 5 : 4) - 1)
+        return (
+          <Box flexDirection="column">
+            {band}
+            {dexRows(dexData, budget).map((row, i) => (
+              <Text key={`dex-${i}`} dimColor={i > 0} bold={i === 0} wrap="truncate-end">{row}</Text>
+            ))}
+            <Button key="dex-cancel" label="Cancel" onPress={closeDex} />
+          </Box>
+        )
+      }
+      if (!hintOpen) return band
+      // The band takes 4 rows (5 with advice); the rest of maxRows is for help, Cancel always shown.
+      const budget = Math.max(1, e.props.maxRows - (advice ? 5 : 4) - 1)
+      return (
+        <Box flexDirection="column">
+          {band}
+          {hintRows(cfg, budget).map((row, i) => (
+            <Text key={`hint-${i}`} dimColor wrap="truncate-end">{row}</Text>
+          ))}
+          <Button key="hint-cancel" label="Cancel" onPress={closeHint} />
         </Box>
       )
     }
@@ -473,13 +566,23 @@ export const register: Register = (on, options) => {
         <Box flexGrow={1} height={1} backgroundColor={TRACK} />
       </Box>
     )
-    return (
+    const row = (
       <Box flexDirection="row" alignItems="center" gap={2} width="100%">
         {sprite && 'Svg' in table ? (
-          <table.Svg source={spriteSvg(sprite, !reducedMotion)} alt={title} width={SPRITE_PX} height={SPRITE_PX + 4} />
+          <table.Svg
+            source={spriteSvg({ base64: sprite, bounds, size: SPRITE_PX, animate: !reducedMotion, crack: p.kind === 'egg' ? p.stage : 0 })}
+            alt={title}
+            width={SPRITE_PX}
+            height={SPRITE_PX}
+          />
         ) : null}
         <Box flexDirection="column" flexGrow={1}>
-          <Text bold>{title}</Text>
+          <Box flexDirection="row" alignItems="center" gap={1}>
+            <Text bold>{title}</Text>
+            <Button key="hint" label="!hint" plain dimColor onPress={openHint} />
+            <Button key="dex" label="dex" plain dimColor onPress={openDex} />
+            <Text dimColor>{milestone}</Text>
+          </Box>
           {barRow(p.fraction, GREEN)}
           <Text dimColor>{`${xp} · ${pending}`}</Text>
           {barRow((usage?.percent ?? 0) / 100, barColor)}
@@ -494,6 +597,56 @@ export const register: Register = (on, options) => {
           onPress={evolve}
         />
         <Button key="hide" label="×" plain dimColor role="dismiss" onPress={hide} />
+      </Box>
+    )
+    if (dexData) {
+      const sprites = await Promise.all(dexData.rows.map(r => loadSprite($, r.id)))
+      const boundsAll = await loadBounds($)
+      return (
+        <Box flexDirection="column" width="100%" gap={1}>
+          {row}
+          <Text bold>{dexRows(dexData, 1)[0]}</Text>
+          {dexData.rows.map((r, i) => {
+            const b64 = sprites[i]
+            const state = r.earned ? 'earned' : r.locked ? 'locked' : `${r.progress?.n ?? 0}/${r.progress?.goal ?? 0}`
+            return (
+              <Box flexDirection="row" alignItems="center" gap={2} width="100%">
+                {b64 && 'Svg' in table ? (
+                  <table.Svg
+                    source={spriteSvg({ base64: b64, bounds: boundsAll[String(r.id)], size: 48, animate: false, silhouette: !r.earned })}
+                    alt={r.earned ? r.name : 'Unknown legendary'}
+                    width={48}
+                    height={48}
+                  />
+                ) : null}
+                <Box flexDirection="column" flexGrow={1}>
+                  <Text bold>{`${r.earned ? '★ ' : ''}${r.name}`}</Text>
+                  <Text dimColor>{r.lore}</Text>
+                  <Text>{r.goal}</Text>
+                  {r.progress ? barRow(r.progress.n / r.progress.goal, r.earned ? GREEN : AMBER) : null}
+                  <Text dimColor>{state}</Text>
+                </Box>
+              </Box>
+            )
+          })}
+          <Box flexDirection="row">
+            <Button key="dex-cancel" label="Cancel" onPress={closeDex} />
+          </Box>
+        </Box>
+      )
+    }
+    if (!hintOpen) return row
+    return (
+      <Box flexDirection="column" width="100%" gap={1}>
+        {row}
+        <Box flexDirection="column" width="100%">
+          {hintRows(cfg, 99).map((line, i) => (
+            <Text key={`hint-${i}`} dimColor>{line}</Text>
+          ))}
+        </Box>
+        <Box flexDirection="row">
+          <Button key="hint-cancel" label="Cancel" onPress={closeHint} />
+        </Box>
       </Box>
     )
   })

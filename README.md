@@ -32,24 +32,44 @@ Needs a Claude Code build with function hooks (plugin `modules`). Desktop draws 
 | Decay | Context ≥ `dangerPercent` (80): pending −2% per completed turn |
 | Recommend | Context ≥ `recommendPercent` (60), or avg growth (last 5 turns) projects ≥ 80% within 3 turns |
 | Qualifying compact | Context ≥ 40% when it ran. Counts toward gates. Lower: XP still applies |
-| Egg | Crack 1 ≥ 800 XP, crack 2 ≥ 1,800, hatch ≥ 3,000. Each stage also needs its own qualifying compact. Hatch: chosen starter or random first-stage non-legendary, Lv 5 |
+| Egg | Species fixed when the egg is made: random first-stage non-legendary, hidden until hatch (only a `choose`n starter shows its name). Hatch level H = clamp(round(BST/60), 4, 10) (Caterpie 4, Bulbasaur 5, Mewtwo 10). Egg XP to hatch = 600 × H, on a 1.5 power curve. Two cracks on the way, then hatch; each stage needs a qualifying compact, max one stage per compact. Cracks show as lines on the egg. The band shows egg level and XP, never when the next stage comes. Hatches at Lv H |
 | Level | Species growth table (fast/medium/medium-slow/slow). Applied XP × clamp((320/BST)^0.35, 0.6, 1.1). Lv 1–100 |
 | Evolution | Level ≥ species level AND qualifying compacts since hatch: 3 (first), 8 (second). Item: Lv 30. Trade: Lv 36 |
 | Branches | Eevee etc.: first by default, `/clawd-mon branch <name>` picks |
+| Box | Many Pokémon and eggs. Only the active one gains XP; pending goes to whoever is active at compact time. `switch` is free |
+| Bonus eggs | +1 egg when the active one evolves into a final form (origin `evolved`); +1 once when a single-stage species hits Lv 40 (`mastery`); +1 every 25 counted compacts. New eggs wait in the box, never auto-active. Band shows `New egg (n/25)` and `Box N` |
 | Pace | Bulbasaur → Venusaur ≈ 30 days at ~1.5M tokens/day, one compact a day alternating manual/auto (23 days all manual) |
 
 Evolve is a no-op with a toast while a turn runs. Evolution is checked at compact time only.
 
 ## Commands
 
-`/clawd-mon [show|hide|status|choose <name>|branch <name>|reset|reset-all]`
+`/clawd-mon [show|hide|hint|dex|status|box|switch <name|#>|release <name|#> confirm|choose <name>|branch <name>|reset-all confirm]`
 
 - `show` / `hide`: band on/off. × on the band = hide.
-- `status`: level, XP, gates, days to next evolution (recent daily pace), lifetime totals.
-- `choose <name>`: egg → set starter (any name resolves to its first stage). Hatched → `choose <name> confirm` swaps to that first stage at Lv 5.
-- `branch <name>`: pick the evolution for a branching species.
-- `reset`: companion back to an egg. Clears pending XP and chosen starter. Lifetime totals kept.
-- `reset-all confirm`: fresh start. Wipes whole save: companion, lifetime, history, settings. Without `confirm` it only warns.
+- `hint`: open the in-band help (same as the `!hint` button; Cancel closes it).
+- `dex`: the catalog in the band (same Cancel as `!hint`; opening one closes the other). Header `Dex n/151 · ★ n/4`, one row per legendary: silhouette and `???` until earned, lore line, goal, progress or `locked`.
+- `status`: active entry, evolution gates, days to next evolution (Pokémon only, recent daily pace), box size, egg progress N/25, lifetime totals.
+- `box`: list entries: number, active marker, name or Egg, level.
+- `switch <name|#>`: make an entry active. Free, no confirm.
+- `release <name|#> confirm`: remove an entry. Active one released: first remaining becomes active. Box empty: a fresh random egg is added and made active.
+- `choose <name>`: starter egg only, before anything has hatched, non-legendary. Any name resolves to its first stage.
+- `branch <name>`: pick the evolution for a branching species (active entry).
+- `reset-all confirm`: fresh start. Wipes whole save: box, lifetime, history, settings. New starter egg; `choose` works again. Without `confirm` it only warns.
+- `reset` is gone: use `release` or `reset-all`.
+
+Save version 2. A version 1 save migrates into box slot 1, active.
+
+## Legendaries
+
+Earned by compact discipline. Each arrives once per save as a ★ egg in the box (not auto-active, hatches at the normal hatch level). Not obtainable with `choose` or from random eggs. `reset-all` clears them.
+
+| Legendary | Lore | Goal |
+|---|---|---|
+| Articuno | Frozen bird of legend | Stay cool: 14 days without reaching `dangerPercent` (80) context. A day with a main turn and max context under the line counts; a day that reaches it resets to 0; days with no turns neither count nor reset |
+| Zapdos | Storm bird of legend | Strike first: 30 qualifying compacts in a row without an auto-compact. Any auto-compact resets to 0 |
+| Moltres | Phoenix bird of legend | Rebirth: fully evolve 3 lines (final-form evolutions and single-stage Lv 40 claims) |
+| Mewtwo | Born in a lab from a legend's DNA | Locked until all three birds are owned. Then 10 fully evolved lines |
 
 ## Config
 
@@ -61,12 +81,23 @@ Plugin options (`/config`):
 | `recommendPercent` | 60 | recommend Evolve at this context % |
 | `dangerPercent` | 80 | decay starts at this context % |
 
+## Dev
+
+```bash
+node tools/sprite-bounds.mjs   # writes data/sprite-bounds.json (content box per sprite; committed)
+node tools/preview.mjs         # writes preview/review.html (gitignored): band in many states, light + dark
+```
+
+Preview uses the real engine, view helpers, data and sprites. Plain Node 22.18+ (type stripping), no install. `hooks/engine.ts` and `hooks/view.ts` stay import-free at runtime for this.
+
 ## Layout
 
 ```
 hooks/engine.ts      pure rules (tested)
+hooks/view.ts        pure text + SVG helpers (tested)
+tools/               sprite-bounds.mjs, preview.mjs
 hooks/register.tsx   hooks + band
-data/                pokedex.json, growth.json
+data/                pokedex.json, growth.json, sprite-bounds.json
 assets/sprites/      <id>.png, egg.png
 tests/               claude plugin test .
 ```
