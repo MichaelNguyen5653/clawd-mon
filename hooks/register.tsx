@@ -1,7 +1,7 @@
 // Clawd-mon: a Pokemon companion in the band above the prompt.
 //
 // It starts as an egg and grows from the tokens you spend. Tokens bank as pending
-// XP; the Evolve button compacts the conversation and applies the bank. The rules
+// XP; a compact (the band says "/compact to level up") applies the bank. The rules
 // live in engine.ts (pure, unit-tested); this file wires them to the session:
 //
 //   session.start     load the save from $.store, register /clawd-mon
@@ -39,6 +39,7 @@ import {
 } from './engine'
 import {
   AMBER,
+  COMPACT_HINT,
   GREEN,
   RARITY_COLOR,
   TRACK,
@@ -163,8 +164,6 @@ async function today($: EngineInterface): Promise<string> {
 let cfg: Config = DEFAULT_CONFIG
 let reducedMotion = false
 let chain: Promise<unknown> = Promise.resolve()
-/** Bumped each time the session.compact hook applies a bank; lets Evolve see whether it ran. */
-let appliedByHook = 0
 
 /** Saves change one at a time: each re-reads the store, so sessions share one companion. */
 function exclusive<T>(work: () => Promise<T>): Promise<T> {
@@ -482,16 +481,13 @@ export const register: Register = (on, options) => {
     return done
   })
 
-  // The place the bank is applied for any compact that reaches this hook (manual, auto, plugin).
-  // Evolve's own compact normally comes through here too; the button only applies the bank itself
-  // when the hook did not see it, so it is never applied twice.
+  // The one place the bank is applied: every compact (/compact, auto, another plugin's) comes through here.
   on('session.compact', async ($, e, next) => {
     if (e.agentId !== undefined || e.trigger === 'precompute') return next(e)
     const percent = await currentPercent($)
     const result = await next(e)
     if ('skip' in result) return result
     await quietly(applyFinishedCompact($, e.trigger, percent))
-    appliedByHook += 1
     return result
   })
 
@@ -557,38 +553,9 @@ export const register: Register = (on, options) => {
     const agents = await read($, agentsAtom)
     const ctx = statsLine(usage, tools, agents)
     const advice = adviceLine(rec, usage, cfg)
-    const isWorking = e.props.isWorking
     const hide = async () => {
       await update($, hiddenAtom, () => true)
       await $.store.set(HIDDEN_KEY, true)
-    }
-    const evolve = async () => {
-      if (isWorking) {
-        $.ui.toast('Clawd-mon: wait for the turn to finish, then Evolve.')
-        return
-      }
-      const percent = await currentPercent($)
-      const seenBefore = appliedByHook
-      try {
-        const result = await $.session.compact()
-        if ('skip' in result) {
-          $.ui.toast(`Clawd-mon: compact skipped (${result.skip})`)
-          return
-        }
-      } catch (err) {
-        // Headless (-p / SDK, the desktop Code tab) refuses a plugin's own compact; a queued /compact
-        // still runs there. The session.compact hook applies the bank when it does, so not here.
-        try {
-          await $.command.run({ command: 'compact' })
-          return
-        } catch {
-          // Say why: the engine's reason is the only clue to a refusal (a turn running, a bad state)
-          const why = (err instanceof Error ? err.message : String(err)).trim().slice(0, 200)
-          $.ui.toast(`Clawd-mon: could not compact right now${why ? ` (${why})` : ''}.`)
-          return
-        }
-      }
-      if (appliedByHook === seenBefore) await applyFinishedCompact($, 'plugin', percent)
     }
     const barColor = contextColor(usage?.percent, cfg)
     const hintOpen = await read($, hintAtom)
@@ -636,14 +603,9 @@ export const register: Register = (on, options) => {
                 <Button key="dex" label="dex" plain dimColor onPress={openDex} />
                 {isActions ? null : <Text dimColor wrap="truncate-end">{milestone}</Text>}
               </Box>
-              <Button
-                key="evolve"
-                label="Evolve"
-                hotkey="e"
-                variant={rec.recommend ? 'primary' : 'secondary'}
-                dimColor={isWorking}
-                onPress={evolve}
-              />
+              <Text key="compact-hint" color={rec.recommend ? AMBER : undefined} dimColor={!rec.recommend} bold={rec.recommend}>
+                {COMPACT_HINT}
+              </Text>
               <Button key="hide" label="×" plain dimColor role="dismiss" onPress={hide} />
             </Box>
             {isActions ? (
@@ -735,13 +697,9 @@ export const register: Register = (on, options) => {
           )}
           {advice ? <Text color={AMBER} bold>{advice}</Text> : null}
         </Box>
-        <Button
-          key="evolve"
-          label="Evolve"
-          hotkey="e"
-          variant={rec.recommend ? 'primary' : 'secondary'}
-          onPress={evolve}
-        />
+        <Text key="compact-hint" color={rec.recommend ? AMBER : undefined} dimColor={!rec.recommend} bold={rec.recommend}>
+          {COMPACT_HINT}
+        </Text>
         <Button key="hide" label="×" plain dimColor role="dismiss" onPress={hide} />
       </Box>
     )
