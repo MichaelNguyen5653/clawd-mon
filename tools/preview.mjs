@@ -27,6 +27,8 @@ import {
   TRACK,
   RARITY_COLOR,
   adviceLine,
+  actionsRows,
+  activityLabel,
   dexRows,
   eventToast,
   hintRows,
@@ -108,7 +110,7 @@ function view(save, u) {
 }
 
 /** One desktop band, laid out like register.tsx draws it. */
-function desktopBand({ save, usage: u, label, hint = false }) {
+function desktopBand({ save, usage: u, label, hint = false, tab = 'levels', activity = null, agents = [] }) {
   const { p, rec, key } = view(save, u)
   const b64 = png(key)
   const svg = b64
@@ -118,15 +120,22 @@ function desktopBand({ save, usage: u, label, hint = false }) {
   const advice = adviceLine(rec, u, cfg)
   const bar = (fraction, fill) =>
     `<div class="bar"><i style="width:${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%;background:${fill}"></i></div>`
+  const isActions = tab === 'actions'
+  const milestone = milestoneLine(overview(save))
+  const ctxPercent = u?.percent !== undefined ? `${u.percent}%` : '—'
+  const actionRows = isActions && activity ? actionsRows(activity, agents, 3, 72) : []
   return `<div class="band">
   <div class="spr">${svg}</div>
   <div class="info">
     ${label ? `<div class="lbl">${esc(label)}</div>` : ''}
-    <div class="trow"><span class="title">${esc(titleOf(p))}</span>${p.kind === 'mon' ? `<span class="rarity" style="background:${RARITY_COLOR[p.rarity]};color:#fff">${esc(` ${rarityLabel(p.rarity)} `)}</span>` : ''}<button class="hintbtn">!hint</button><span class="sub">${esc(milestoneLine(overview(save)))}</span></div>
-    ${bar(p.fraction, GREEN)}
+    <div class="trow"><button class="tab${isActions ? ' active' : ''}" style="opacity:${isActions ? '1' : '.5'}">Actions</button><button class="tab${!isActions ? ' active' : ''}" style="opacity:${!isActions ? '1' : '.5'}">Levels</button><span class="title">${esc(titleOf(p))}</span>${p.kind === 'mon' ? `<span class="rarity" style="background:${RARITY_COLOR[p.rarity]};color:#fff">${esc(` ${rarityLabel(p.rarity)} `)}</span>` : ''}${isActions ? `<span class="sub" style="color:${color}">${esc(ctxPercent)}</span>` : ''}<button class="hintbtn">!hint</button><span class="sub">${isActions ? '' : esc(milestone)}</span><button class="dexbtn" style="opacity:.55">dex</button></div>
+    ${isActions
+      ? actionRows.map(r => `<div class="sub">${esc(r)}</div>`).join('')
+      : `${bar(p.fraction, GREEN)}
     <div class="sub">${esc(`${xpLine(p)} · ${pendingLine(p)}`)}</div>
     ${bar((u?.percent ?? 0) / 100, color)}
-    <div class="sub" style="color:${color}">${esc(stats(u))}</div>
+    <div class="sub" style="color:${color}">${esc(stats(u))}</div>`
+    }
     ${advice ? `<div class="advice">${esc(advice)}</div>` : ''}
   </div>
   <div class="btns"><button class="${rec.recommend ? 'primary' : ''}">Evolve</button><button class="x">×</button></div>
@@ -134,17 +143,31 @@ function desktopBand({ save, usage: u, label, hint = false }) {
 }
 
 /** The terminal rows for a band: text only, the sprite is a kitty-protocol Image there. */
-function terminalBand({ save, usage: u, hint = false, maxRows = 12 }) {
+function terminalBand({ save, usage: u, hint = false, maxRows = 12, tab = 'levels', activity = null, agents = [] }) {
   const { p, rec } = view(save, u)
   const pad = ' '.repeat(10)
   const advice = adviceLine(rec, u, cfg)
   const rarityText = p.kind === 'mon' ? ` [${rarityLabel(p.rarity)}]` : ''
-  const rows = [
-    `┌────────┐  ${titleOf(p)}${rarityText} !hint  ${milestoneLine(overview(save))}   [ Evolve ] ×`,
-    `│ sprite │  ${textBar(p.fraction, 20)} ${xpLine(p)}`,
-    `│  8x4   │  ${pendingLine(p)}`,
-    `└────────┘  ${textBar((u?.percent ?? 0) / 100, 20)} ${stats(u)}`,
-  ]
+  const isActions = tab === 'actions'
+  const ctxPercent = u?.percent !== undefined ? `${u.percent}%` : '—'
+  const milestone = milestoneLine(overview(save))
+  const actionRows = isActions && activity ? actionsRows(activity, agents, 3, 72) : []
+  const rows = []
+  // First row: sprite, tabs, title, rarity, context/milestone, buttons
+  const titleLine = `${titleOf(p)}${rarityText} ${isActions ? ctxPercent : ''} !hint dex [ Evolve ] ×`
+  rows.push(`┌────────┐  Actions Levels  ${titleLine}`.slice(0, 100))
+  if (isActions && activity) {
+    // Actions tab: show action rows
+    rows.push(`│ sprite │  ${actionRows[0] || 'Idle'}`)
+    if (actionRows[1]) rows.push(`│  8x4   │  ${actionRows[1]}`)
+    if (actionRows[2]) rows.push(`└────────┘  ${actionRows[2]}`)
+    if (!actionRows[2]) rows.push(`└────────┘`)
+  } else {
+    // Levels tab: show XP and context bars
+    rows.push(`│ sprite │  ${textBar(p.fraction, 20)} ${xpLine(p)}`)
+    rows.push(`│  8x4   │  ${pendingLine(p)}`)
+    rows.push(`└────────┘  ${textBar((u?.percent ?? 0) / 100, 20)} ${stats(u)}`)
+  }
   if (advice) rows.push(`${pad}${advice}`)
   if (hint) {
     const budget = Math.max(1, maxRows - (advice ? 5 : 4) - 1)
@@ -205,6 +228,81 @@ SCENARIOS.push(
   },
 )
 
+// Actions tab scenarios
+const actionAgentList = [
+  { id: 'ag1', name: 'researcher', type: 'agent', description: 'Gathering context', status: 'running' },
+  { id: 'ag2', name: 'tester', type: 'agent', description: 'update rarity tests', status: 'running' },
+  { id: 'ag3', type: 'agent', description: '', status: 'idle' },
+]
+const actionAgentList5 = [
+  { id: 'ag1', name: 'researcher', type: 'agent', description: 'Gathering context', status: 'running' },
+  { id: 'ag2', name: 'tester', type: 'agent', description: 'update rarity tests', status: 'running' },
+  { id: 'ag3', type: 'agent', description: 'analyzing data', status: 'running' },
+  { id: 'ag4', type: 'agent', description: 'building components', status: 'waiting' },
+  { id: 'ag5', type: 'agent', description: 'reviewing changes', status: 'pending' },
+]
+
+SCENARIOS.push(
+  {
+    n: 's',
+    caption: 'Actions tab, idle: no tasks running.',
+    bands: [{ save: mon(1, 12, { milestone: 3 }), usage: usage(30, 200_000), tab: 'actions', activity: { doing: {}, busy: false, task: null, tasks: {} }, agents: [] }],
+  },
+  {
+    n: 't',
+    caption: 'Actions tab, main gathering context: shows current action and context percent.',
+    bands: [{
+      save: mon(2, 22, { compacts: 3, pending: 620 }),
+      usage: usage(62, 200_000),
+      tab: 'actions',
+      activity: { doing: { '': { callId: 'c1', tool: 'Read' } }, busy: true, task: null, tasks: {} },
+      agents: []
+    }],
+  },
+  {
+    n: 'u',
+    caption: 'Actions tab, 3 agents: researcher gathering context, tester editing with skill, idle teammate.',
+    bands: [{
+      save: mon(2, 22, { compacts: 3, pending: 620 }),
+      usage: usage(45, 200_000),
+      tab: 'actions',
+      activity: {
+        doing: {
+          '': { callId: 'c1', tool: 'Read' },
+          'ag1': { callId: 'c2', tool: 'Read' },
+          'ag2': { callId: 'c3', tool: 'Skill', skill: 'tdd-workflow' },
+        },
+        busy: true,
+        task: null,
+        tasks: {}
+      },
+      agents: actionAgentList
+    }],
+  },
+  {
+    n: 'v',
+    caption: 'Actions tab, 5 agents: overflow shows (+N more) on the last row.',
+    bands: [{
+      save: mon(3, 40, { compacts: 14, pending: 90 }),
+      usage: usage(28, 200_000),
+      tab: 'actions',
+      activity: {
+        doing: {
+          '': { callId: 'c0', tool: 'Bash' },
+          'ag1': { callId: 'c1', tool: 'Read' },
+          'ag2': { callId: 'c2', tool: 'Write' },
+          'ag3': { callId: 'c3', tool: 'Bash' },
+          'ag4': { callId: 'c4', tool: 'Agent', waitingOn: 'ag1' },
+        },
+        busy: true,
+        task: null,
+        tasks: {}
+      },
+      agents: actionAgentList5
+    }],
+  },
+)
+
 const boxDemo = {
   ...mon(2, 22, { compacts: 3 }),
   box: [
@@ -262,11 +360,11 @@ const dexTerminal = s => dexRows(dexView(s, dex, cfg), 8).join('\n') + '\n[ Canc
 
 const letters = 'abcdefghijklmnopqrstuvwxyz'
 const cards = SCENARIOS.map((s, i) => {
-  const panel = theme => `<div class="panel ${theme}">${s.bands.map(desktopBand).join('')}</div>`
+  const panel = theme => `<div class="panel ${theme}">${s.bands.map(b => desktopBand({ ...b, tab: b.tab || 'levels', activity: b.activity || null, agents: b.agents || [] })).join('')}</div>`
   const term = (s.terminal ?? [])
     .map(
       b =>
-        `<div class="pair"><pre class="panel light">${esc(`(${b.note})\n${terminalBand(b)}`)}</pre><pre class="panel dark">${esc(`(${b.note})\n${terminalBand(b)}`)}</pre></div>`,
+        `<div class="pair"><pre class="panel light">${esc(`(${b.note})\n${terminalBand({ ...b, tab: b.tab || 'levels', activity: b.activity || null, agents: b.agents || [] })}`)}</pre><pre class="panel dark">${esc(`(${b.note})\n${terminalBand({ ...b, tab: b.tab || 'levels', activity: b.activity || null, agents: b.agents || [] })}`)}</pre></div>`,
     )
     .join('')
   return `<section><h2><span>${s.n ?? letters[i]}</span> ${esc(s.caption)}</h2><div class="pair">${panel('light')}${panel('dark')}</div>${term}</section>`
@@ -310,8 +408,9 @@ const html = `<!doctype html>
   .band { display: flex; align-items: center; gap: 14px; }
   .spr { width: 80px; height: 80px; flex: none; } .spr svg { display: block; }
   .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-  .lbl { font-size: 11px; opacity: .6; } .title { font-weight: 700; } .trow { display: flex; align-items: center; gap: 8px; } .rarity { padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 700; }
-  .hintbtn { border: 0; padding: 0; opacity: .55; font-size: 12px; } .help { font-size: 12px; opacity: .85; padding: 6px 0 0 94px; display: flex; flex-direction: column; gap: 2px; } .help button { align-self: flex-start; margin-top: 4px; } .dexhelp { padding: 8px 0 0 0; gap: 8px; } .dexrow { gap: 10px; } .spr.sm { width: 48px; height: 48px; }
+  .lbl { font-size: 11px; opacity: .6; } .title { font-weight: 700; } .trow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .rarity { padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 700; }
+  .tab { border: 0; padding: 0; font-size: 12px; cursor: pointer; margin-right: 4px; } .tab.active { font-weight: 700; }
+  .hintbtn { border: 0; padding: 0; opacity: .55; font-size: 12px; } .dexbtn { border: 0; padding: 0; opacity: .55; font-size: 12px; cursor: pointer; } .help { font-size: 12px; opacity: .85; padding: 6px 0 0 94px; display: flex; flex-direction: column; gap: 2px; } .help button { align-self: flex-start; margin-top: 4px; } .dexhelp { padding: 8px 0 0 0; gap: 8px; } .dexrow { gap: 10px; } .spr.sm { width: 48px; height: 48px; }
   .bar { height: 6px; background: ${TRACK}; } .bar i { display: block; height: 100%; }
   .sub { opacity: .75; font-size: 12px; } .advice { color: #E0A030; font-weight: 700; font-size: 12px; }
   .btns { display: flex; gap: 6px; } button { font: inherit; padding: 4px 10px; border-radius: 4px; border: 1px solid #8886; background: transparent; color: inherit; }

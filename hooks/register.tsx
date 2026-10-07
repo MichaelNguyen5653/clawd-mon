@@ -42,6 +42,7 @@ import {
   GREEN,
   RARITY_COLOR,
   TRACK,
+  actionsRows,
   adviceLine,
   rarityLabel,
   dexRows,
@@ -70,7 +71,11 @@ const toolsAtom = atom({ plugin: 'clawd-mon', key: 'tools' } as const, {
   calls: 0,
   seeded: false,
 })
-const agentsAtom = atom({ plugin: 'clawd-mon', key: 'agents' } as const, { running: null, total: null })
+const agentsAtom = atom({ plugin: 'clawd-mon', key: 'agents' } as const, { running: null, total: null, list: [] })
+const tabAtom = atom({ plugin: 'clawd-mon', key: 'tab' } as const, 'actions')
+const activityAtom = atom({ plugin: 'clawd-mon', key: 'activity' } as const, { doing: {}, busy: false, task: null, tasks: {} })
+/** The Actions tab clips each row to this many characters so it never wraps. */
+const ACTIONS_WIDTH = 72
 const AGENT_TICK_MS = 4000
 
 const COMMAND = 'clawd-mon'
@@ -224,11 +229,65 @@ async function refreshTools($: EngineInterface): Promise<void> {
 }
 
 async function refreshAgents($: EngineInterface): Promise<void> {
-  const list = await $.agent.list()
-  const running = list.filter(a => a.status === 'running').length
+  const all = await $.agent.list()
+  const running = all.filter(a => a.status === 'running').length
+  const list = all.map(a => ({ id: a.id, name: a.name, type: a.type, description: a.description, status: a.status }))
   const prev = await read($, agentsAtom)
-  if (prev.running === running && prev.total === list.length) return
-  await update($, agentsAtom, () => ({ running, total: list.length }))
+  if (prev.running === running && prev.total === all.length && JSON.stringify(prev.list) === JSON.stringify(list)) return
+  await update($, agentsAtom, () => ({ running, total: all.length, list }))
+}
+
+/** The in-progress item of a TodoWrite list: its present-tense text, or null when none is. */
+function todoTask(todos: unknown): string | null {
+  if (!Array.isArray(todos)) return null
+  const t = todos.find(x => x && typeof x === 'object' && (x as { status?: unknown }).status === 'in_progress') as
+    | { content?: unknown; activeForm?: unknown }
+    | undefined
+  const text = t ? (t.activeForm ?? t.content) : null
+  return typeof text === 'string' && text.trim() ? text.trim() : null
+}
+
+type CallFacts = { tool: string; tool_use_id: string; agentId?: string } & Record<string, unknown>
+
+/** A loop started a tool call: that is what it is doing now. */
+function startCall($: EngineInterface, e: CallFacts): Promise<void> {
+  const skill = e.tool === 'Skill' && typeof e.skill === 'string' ? e.skill : undefined
+  return update($, activityAtom, a => ({ ...a, doing: { ...a.doing, [e.agentId ?? '']: { callId: e.tool_use_id, tool: e.tool, skill } } }))
+}
+
+/** That call ended: the loop goes back to thinking, unless a later call already took its place. */
+function endCall($: EngineInterface, e: CallFacts): Promise<void> {
+  const loop = e.agentId ?? ''
+  return update($, activityAtom, a => {
+    if (a.doing[loop]?.callId !== e.tool_use_id) return a
+    const { [loop]: _gone, ...doing } = a.doing
+    return { ...a, doing }
+  })
+}
+
+/** The main loop's task list (TodoWrite, or TaskCreate / TaskUpdate) names the task in progress. */
+async function trackTask($: EngineInterface, e: CallFacts, result: unknown): Promise<void> {
+  if (e.agentId !== undefined) return
+  const tool = e.tool
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+  if (tool === 'TodoWrite') {
+    await update($, activityAtom, a => ({ ...a, task: todoTask(e.todos) }))
+  } else if (tool === 'TaskCreate') {
+    const id = str((result as { result?: { task?: { id?: unknown } } })?.result?.task?.id)
+    const text = str(e.activeForm) ?? str(e.subject)
+    if (id && text) await update($, activityAtom, a => ({ ...a, tasks: { ...a.tasks, [id]: { text, status: 'pending' } } }))
+  } else if (tool === 'TaskUpdate') {
+    const id = str(e.taskId)
+    if (!id) return
+    await update($, activityAtom, a => {
+      const was = a.tasks[id]
+      const text = str(e.activeForm) ?? str(e.subject) ?? was?.text ?? `Task ${id}`
+      const status = str(e.status) ?? was?.status ?? 'pending'
+      const tasks = { ...a.tasks, [id]: { text, status } }
+      const current = Object.values(tasks).find(t => t.status === 'in_progress')
+      return { ...a, tasks, task: current?.text ?? null }
+    })
+  }
 }
 
 /** Counts tool calls made before the mod loaded, from the main transcript, once. */
@@ -338,13 +397,51 @@ export const register: Register = (on, options) => {
         usedNames: t.usedNames.includes(name) ? t.usedNames : [...t.usedNames, name],
       })),
     )
-    const ran = await next(e)
+    const facts = { ...(e as Record<string, unknown>), tool: name, tool_use_id: e.tool_use_id, agentId: e.agentId }
+    await quietly(startCall($, facts))
+    let ran: Awaited<ReturnType<typeof next>>
+    try {
+      ran = await next(e)
+    } finally {
+      await quietly(endCall($, facts))
+    }
+    await quietly(trackTask($, facts, ran))
     if (name === 'Agent' || name === 'Task') await quietly(refreshAgents($))
     return ran
   })
 
+  // A foreground agent blocks the loop that spawned it until it returns.
+  on('agent.spawn', async ($, e, next) => {
+    const done = await next(e)
+    const child = 'agentId' in done ? done.agentId : undefined
+    if (child && !e.background) {
+      const loop = e.parentAgentId ?? ''
+      await quietly(
+        update($, activityAtom, a => {
+          const was = a.doing[loop]
+          return was ? { ...a, doing: { ...a.doing, [loop]: { ...was, waitingOn: child } } } : a
+        }),
+      )
+    }
+    await quietly(refreshAgents($))
+    return done
+  })
+
+  on('turn.start', async ($, e, next) => {
+    await quietly(update($, activityAtom, a => ({ ...a, busy: true })))
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    // A loop that finished its turn is doing nothing; only the main loop's end clears `busy`.
+    const loop = e.agentId ?? ''
+    await quietly(
+      update($, activityAtom, a => {
+        const { [loop]: _done, ...doing } = a.doing
+        return { ...a, busy: loop === '' ? false : a.busy, doing }
+      }),
+    )
     await quietly(refreshTools($))
     await quietly(refreshAgents($))
     await quietly(
@@ -508,6 +605,14 @@ export const register: Register = (on, options) => {
     const closeDex = () => update($, dexAtom, () => false)
     const dexData = dexOpen ? dexView(save, dex, cfg) : null
     const milestone = milestoneLine(overview(save))
+    // Actions (default): what is happening now, in at most three rows, so it never outgrows Levels.
+    const tab = await read($, tabAtom)
+    const isActions = tab === 'actions'
+    const showActions = () => update($, tabAtom, () => 'actions' as const)
+    const showLevels = () => update($, tabAtom, () => 'levels' as const)
+    // `?? []`: a hot reload keeps the state an older module wrote, which had no list.
+    const actions = isActions ? actionsRows(await read($, activityAtom), agents.list ?? [], 3, ACTIONS_WIDTH) : []
+    const ctxPercent = usage?.percent !== undefined ? `${usage.percent}%` : '—'
 
     if (e.surface === 'terminal') {
       const { Box, Text, Button, Image } = $.ui.resolve(e)
@@ -520,13 +625,16 @@ export const register: Register = (on, options) => {
           <Box flexDirection="column" flexGrow={1}>
             <Box flexDirection="row" gap={2}>
               <Box flexGrow={1} flexDirection="row" gap={1}>
+                <Button key="tab-actions" label="Actions" plain dimColor={!isActions} onPress={showActions} />
+                <Button key="tab-levels" label="Levels" plain dimColor={isActions} onPress={showLevels} />
                 <Text bold wrap="truncate-end">{title}</Text>
                 {p.kind === 'mon' ? (
                   <Text key="rarity" color={RARITY_COLOR[p.rarity]} bold>{`[${rarityLabel(p.rarity)}]`}</Text>
                 ) : null}
+                {isActions ? <Text key="ctx" color={barColor}>{ctxPercent}</Text> : null}
                 <Button key="hint" label="!hint" plain dimColor onPress={openHint} />
                 <Button key="dex" label="dex" plain dimColor onPress={openDex} />
-                <Text dimColor wrap="truncate-end">{milestone}</Text>
+                {isActions ? null : <Text dimColor wrap="truncate-end">{milestone}</Text>}
               </Box>
               <Button
                 key="evolve"
@@ -538,9 +646,17 @@ export const register: Register = (on, options) => {
               />
               <Button key="hide" label="×" plain dimColor role="dismiss" onPress={hide} />
             </Box>
-            <Text color={GREEN}>{`${bar(p.fraction)} ${xp}`}</Text>
-            <Text dimColor wrap="truncate-end">{pending}</Text>
-            <Text color={barColor}>{`${bar((usage?.percent ?? 0) / 100)} ${ctx}`}</Text>
+            {isActions ? (
+              actions.map((line, i) => (
+                <Text key={`act-${i}`} dimColor={i > 0} wrap="truncate-end">{line}</Text>
+              ))
+            ) : (
+              [
+                <Text key="xp" color={GREEN}>{`${bar(p.fraction)} ${xp}`}</Text>,
+                <Text key="pending" dimColor wrap="truncate-end">{pending}</Text>,
+                <Text key="ctx-bar" color={barColor}>{`${bar((usage?.percent ?? 0) / 100)} ${ctx}`}</Text>,
+              ]
+            )}
             {advice ? <Text color={AMBER} bold>{advice}</Text> : null}
           </Box>
         </Box>
@@ -574,8 +690,8 @@ export const register: Register = (on, options) => {
     const table = $.ui.resolve(e)
     const { Box, Text, Button } = table
     const pct = (f: number) => `${Math.round(Math.max(0, Math.min(1, f)) * 100)}%` as const
-    const barRow = (fraction: number, color: string) => (
-      <Box flexDirection="row" width="100%" height={1}>
+    const barRow = (fraction: number, color: string, key?: string) => (
+      <Box key={key} flexDirection="row" width="100%" height={1}>
         {fraction > 0 ? <Box width={pct(fraction)} height={1} backgroundColor={color} /> : null}
         <Box flexGrow={1} height={1} backgroundColor={TRACK} />
       </Box>
@@ -592,20 +708,31 @@ export const register: Register = (on, options) => {
         ) : null}
         <Box flexDirection="column" flexGrow={1}>
           <Box flexDirection="row" alignItems="center" gap={1}>
+            <Button key="tab-actions" label="Actions" plain dimColor={!isActions} onPress={showActions} />
+            <Button key="tab-levels" label="Levels" plain dimColor={isActions} onPress={showLevels} />
             <Text bold>{title}</Text>
             {p.kind === 'mon' ? (
               <Box key="rarity" backgroundColor={RARITY_COLOR[p.rarity]}>
                 <Text color="#FFFFFF" bold>{` ${rarityLabel(p.rarity)} `}</Text>
               </Box>
             ) : null}
+            {isActions ? <Text key="ctx" color={barColor}>{ctxPercent}</Text> : null}
             <Button key="hint" label="!hint" plain dimColor onPress={openHint} />
             <Button key="dex" label="dex" plain dimColor onPress={openDex} />
-            <Text dimColor>{milestone}</Text>
+            {isActions ? null : <Text dimColor>{milestone}</Text>}
           </Box>
-          {barRow(p.fraction, GREEN)}
-          <Text dimColor>{`${xp} · ${pending}`}</Text>
-          {barRow((usage?.percent ?? 0) / 100, barColor)}
-          <Text color={barColor}>{ctx}</Text>
+          {isActions ? (
+            actions.map((line, i) => (
+              <Text key={`act-${i}`} dimColor={i > 0}>{line}</Text>
+            ))
+          ) : (
+            [
+              barRow(p.fraction, GREEN, 'xp-bar'),
+              <Text key="xp" dimColor>{`${xp} · ${pending}`}</Text>,
+              barRow((usage?.percent ?? 0) / 100, barColor, 'ctx-bar'),
+              <Text key="ctx" color={barColor}>{ctx}</Text>,
+            ]
+          )}
           {advice ? <Text color={AMBER} bold>{advice}</Text> : null}
         </Box>
         <Button

@@ -1,6 +1,6 @@
 {
   "name": "clawd-mon",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "A Pokemon companion above the prompt. Hatches from an egg and levels on tokens you spend; Evolve compacts the context and banks the XP.",
   "author": {
     "name": "Clawd-mon contributors"
