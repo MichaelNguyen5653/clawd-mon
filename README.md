@@ -43,6 +43,30 @@ Needs a Claude Code build with function hooks (plugin `modules`). Desktop draws 
 
 Evolve is a no-op with a toast while a turn runs. Evolution is checked at compact time only.
 
+## Band tabs
+
+Two tabs at the start of the title row (selected bright, other dim). Actions is the default each session.
+
+| Tab | Shows |
+|---|---|
+| Actions | Title row with context `62%` (no milestone). Then a summary of now, never a log: `Current action - …`, one `Agent N - [name - ]…` row per live agent. Max 3 rows; extra agents fold into `(+N more)`. Rows clipped to 72 chars. Never taller than Levels |
+| Levels | The band as before: XP and pending, context bar, agents/tools stats, `New egg (n/25)` |
+
+Current action: in-progress task (`TodoWrite` / `TaskUpdate`) → `Waiting on Agent N` (foreground agent) → tool label → `Thinking` (turn running) → `Idle`.
+
+| Tool | Label |
+|---|---|
+| Read, Grep, Glob, LSP, ToolSearch | Gathering context |
+| Edit, MultiEdit, Write, NotebookEdit | Editing files |
+| Bash, PowerShell, Monitor | Running commands |
+| WebSearch, WebFetch, `mcp__*` | Researching |
+| Agent | Delegating to agents |
+| TodoWrite, Task* | Planning |
+| Skill | Using `<skill>` skill (agent rows: `… to <its task>`) |
+| other | Using `<tool>` |
+
+Agent rows with no tool in flight: `Waiting` (idle teammate), `Starting`, else the agent's task description.
+
 ## Commands
 
 `/clawd-mon [show|hide|hint|dex|status|box|switch <name|#>|release <name|#> confirm|choose <name>|branch <name>|reset-all confirm]`

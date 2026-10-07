@@ -98,11 +98,46 @@ export type ClawdMonTools = {
   seeded: boolean
 }
 
+/** One subagent or teammate as the Actions tab needs it. */
+export type ClawdMonAgent = {
+  id: string
+  name?: string
+  type: string
+  /** The Agent call's few-word description of its task. */
+  description: string
+  status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed'
+}
+
 /** Agents: subagents and teammates of this session ($.agent.list()). */
 export type ClawdMonAgents = {
   /** null until first read. */
   running: number | null
   total: number | null
+  /** In list order; the Actions tab numbers the live ones. */
+  list: ClawdMonAgent[]
+}
+
+/** What one loop is doing right now: the tool call in flight, or the agent it waits on. */
+export type ClawdMonDoing = {
+  /** The tool_use_id that set it; only that call's end clears it. */
+  callId: string
+  tool: string
+  /** The Skill tool's skill name. */
+  skill?: string
+  /** A foreground agent this loop is blocked on. */
+  waitingOn?: string
+}
+
+/** The Actions tab: a summary of what is happening now, never a log. */
+export type ClawdMonActivity = {
+  /** Per loop: '' is the main loop, otherwise the agent id. */
+  doing: Record<string, ClawdMonDoing>
+  /** The main loop is mid-turn. */
+  busy: boolean
+  /** The in-progress task's present-tense text (TodoWrite / TaskUpdate), or null. */
+  task: string | null
+  /** TaskCreate'd tasks by id, so a TaskUpdate can name its task. */
+  tasks: Record<string, { text: string; status: string }>
 }
 
 declare module 'claude-code' {
@@ -119,6 +154,9 @@ declare module 'claude-code' {
       /** Per session, not shared: tools and agents of this session. */
       tools: ClawdMonTools
       agents: ClawdMonAgents
+      /** This session: the band's tab; Actions by default. */
+      tab: 'actions' | 'levels'
+      activity: ClawdMonActivity
     }
   }
 }

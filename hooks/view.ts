@@ -1,7 +1,7 @@
 // Clawd-mon view helpers: the text and SVG the band shows. Pure, with type-only imports,
 // so plain Node can load this file (tools/preview.mjs) as well as the plugin.
 
-import type { ClawdMonAgents, ClawdMonTools, ClawdMonUsage } from '../types'
+import type { ClawdMonActivity, ClawdMonAgent, ClawdMonAgents, ClawdMonTools, ClawdMonUsage } from '../types'
 import type { Config, Dex, DexRow, DexView, GameEvent, Overview, Progress, Rarity, Recommendation } from './engine'
 
 export const GREEN = '#4CAF50'
@@ -133,6 +133,71 @@ export function eventToast(ev: GameEvent, dex: Dex): string {
 /** Dim row beside the title: progress to the next bonus egg, and the box size once it holds more than one. */
 export function milestoneLine(o: Overview): string {
   return `New egg (${o.milestone}/${o.goal})${o.boxCount > 1 ? ` · Box ${o.boxCount}` : ''}`
+}
+
+// ---------- actions tab ----------
+
+const CONTEXT_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LSP', 'ToolSearch'])
+const EDIT_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'Monitor'])
+const WEB_TOOLS = new Set(['WebSearch', 'WebFetch'])
+const PLAN_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'])
+/** Agent statuses that still get a row. */
+const LIVE = new Set<ClawdMonAgent['status']>(['pending', 'running', 'waiting', 'idle'])
+
+/** A tool call in flight, as a few words of what the loop is doing. */
+export function activityLabel(tool: string, skill?: string): string {
+  if (tool === 'Skill') return `Using ${skill || 'a'} skill`
+  if (CONTEXT_TOOLS.has(tool)) return 'Gathering context'
+  if (EDIT_TOOLS.has(tool)) return 'Editing files'
+  if (SHELL_TOOLS.has(tool)) return 'Running commands'
+  if (WEB_TOOLS.has(tool) || tool.startsWith('mcp__')) return 'Researching'
+  if (tool === 'Agent' || tool === 'Task') return 'Delegating to agents'
+  if (PLAN_TOOLS.has(tool)) return 'Planning'
+  return `Using ${tool}`
+}
+
+function clip(s: string, width: number): string {
+  return s.length <= width ? s : `${s.slice(0, Math.max(0, width - 1)).trimEnd()}…`
+}
+
+function lowerFirst(s: string): string {
+  return s ? s[0]!.toLowerCase() + s.slice(1) : s
+}
+
+/**
+ * The Actions tab: "Current action - ..." then one row per live agent, at most `budget` rows,
+ * each clipped to `width`. Agents past the budget fold into "(+N more)" on the last row.
+ */
+export function actionsRows(act: ClawdMonActivity, agents: ClawdMonAgent[], budget: number, width: number): string[] {
+  const live = agents.filter(a => LIVE.has(a.status))
+  const waitingOn = (id: string) => {
+    const n = live.findIndex(a => a.id === id) + 1
+    return n > 0 ? `Waiting on Agent ${n}` : 'Waiting on an agent'
+  }
+  const own = act.doing['']
+  const main =
+    act.task ?? (own?.waitingOn ? waitingOn(own.waitingOn) : own ? activityLabel(own.tool, own.skill) : act.busy ? 'Thinking' : 'Idle')
+  const agentRow = (a: ClawdMonAgent, i: number) => {
+    const d = act.doing[a.id]
+    const what = d?.waitingOn
+      ? waitingOn(d.waitingOn)
+      : d?.tool === 'Skill'
+        ? `${activityLabel('Skill', d.skill)}${a.description ? ` to ${lowerFirst(a.description)}` : ''}`
+        : d
+          ? `${activityLabel(d.tool)}${a.description ? ` · ${a.description}` : ''}`
+          : a.status === 'idle' || a.status === 'waiting'
+            ? 'Waiting'
+            : a.status === 'pending'
+              ? 'Starting'
+              : a.description || 'Working'
+    return `Agent ${i + 1} - ${a.name ? `${a.name} - ` : ''}${what}`
+  }
+  const rows = [`Current action - ${main}`, ...live.map(agentRow)]
+  const keep = Math.max(1, budget)
+  if (rows.length <= keep) return rows.map(r => clip(r, width))
+  const more = ` (+${rows.length - keep} more)`
+  return rows.slice(0, keep).map((r, i) => (i === keep - 1 ? `${clip(r, width - more.length)}${more}` : clip(r, width)))
 }
 
 // ---------- in-band help ----------

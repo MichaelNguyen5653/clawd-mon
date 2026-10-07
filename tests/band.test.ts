@@ -31,7 +31,7 @@ const COMMAND = {
 const BOUNDS = { '1': [28, 30, 35, 33], egg: [34, 34, 28, 30] }
 const MESSAGES = [{ role: 'user' as const, text: 'hello', toolUses: [] }]
 
-type Counters = { compacts: number; queuedCompacts: number; runQueued?: boolean; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown> }
+type Counters = { compacts: number; queuedCompacts: number; runQueued?: boolean; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown>; agents?: Array<{ id: string; name?: string; description: string; type: string; status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed' }>; toolGate?: Promise<void>; toolResult?: (e: { tool: string }) => unknown }
 
 /** The engine beneath the plugin: fixed usage, the data files, a sprite, a compact that works. */
 function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: boolean; compactRejects?: string; headless?: boolean } = {}): Counters {
@@ -70,7 +70,7 @@ function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: b
   on('agent.list', () => {
     if (options.noLists) throw new Error('no agent list')
     return {
-      value: [
+      value: seen.agents ?? [
         { id: 'a1', description: 'scan', type: 'Explore', status: 'running' },
         { id: 'a2', description: 'plan', type: 'Plan', status: 'completed' },
       ],
@@ -89,7 +89,10 @@ function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: b
       },
     ],
   }))
-  on('tool.call', () => ({ result: { text: 'ok' } }))
+  on('tool.call', async (_$, e) => {
+    await seen.toolGate // a test holds a call in flight by setting this
+    return (seen.toolResult?.(e) ?? { result: { text: 'ok' } }) as { result: { text: string } }
+  })
   on('config.list', () => ({ value: [] }))
   on('fs.read', (_$, e) => {
     if (e.path.endsWith('pokedex.json')) return { value: JSON.stringify(SPECIES) }
@@ -155,6 +158,7 @@ describe('band', () => {
     seen.store.set('save', mon(1, 5000, { pending: 321 }))
     await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    await ui.press({ key: 'tab-levels' })
     expect(await ui.find({ type: 'Svg' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Bulbasaur/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Lv \d+/ })).toBeDefined()
@@ -170,6 +174,7 @@ describe('band', () => {
     seen.store.set('save', mon(1, 5000, { pending: 321 }))
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    await ui.press({ key: 'tab-levels' })
     expect(await ui.find({ type: 'Image' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Bulbasaur/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /321/ })).toBeDefined()
@@ -220,6 +225,7 @@ describe('band', () => {
     for (const surface of ['desktop', 'terminal'] as const) {
       await $.session.start({ cwd: '.', surface, isInteractive: true })
       const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      await ui.press({ key: 'tab-levels' })
       expect(await ui.find({ type: 'Text', text: /Context 62% · 124K \/ 200K/ })).toBeDefined()
       await ui.unmount()
     }
@@ -231,6 +237,7 @@ describe('band', () => {
       seen.store.set('save', { ...mon(1, 5000, { milestone: 24 }), box: [hatchedEntry('a1', 1, 5000), newEntry('a2', 'milestone', 4), newEntry('a3', 'milestone', 4)], activeId: 'a1' })
       await $.session.start({ cwd: '.', surface, isInteractive: true })
       const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      await ui.press({ key: 'tab-levels' })
       expect(await ui.find({ key: 'hint' })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /New egg \(24\/25\) · Box 3/ })).toBeDefined()
       await ui.unmount()
@@ -242,6 +249,7 @@ describe('band', () => {
     seen.store.set('save', mon(1, 5000))
     await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    await ui.press({ key: 'tab-levels' })
     expect(await ui.find({ type: 'Text', text: /^New egg \(0\/25\)$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Box \d/ })).toBeUndefined()
     await ui.unmount()
@@ -410,6 +418,7 @@ describe('band', () => {
     for (const surface of ['desktop', 'terminal'] as const) {
       await $.session.start({ cwd: '.', surface, isInteractive: true })
       const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      await ui.press({ key: 'tab-levels' })
       const line = /Context 62% · 124K \/ 200K · Agents 1 running · 2 spawned · Tools 3 avail \(1 MCP\) · 2 used · 3 calls/
       expect(await ui.find({ type: 'Text', text: line })).toBeDefined()
       await ui.unmount()
@@ -423,6 +432,7 @@ describe('band', () => {
     await $.tool.call({ tool: 'Grep', pattern: 'x' })
     await $.tool.call({ tool: 'Read', file_path: 'a' })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    await ui.press({ key: 'tab-levels' })
     expect(await ui.find({ type: 'Text', text: /3 used · 5 calls/ })).toBeDefined()
     await ui.unmount()
   })
@@ -433,6 +443,7 @@ describe('band', () => {
     await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
     await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    await ui.press({ key: 'tab-levels' })
     expect(await ui.find({ type: 'Text', text: /2 used · 3 calls/ })).toBeDefined()
     await ui.unmount()
   })
@@ -442,6 +453,7 @@ describe('band', () => {
     seen.store.set('save', mon(1, 5000))
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    await ui.press({ key: 'tab-levels' })
     expect(await ui.find({ type: 'Text', text: /Agents n\/a · Tools n\/a avail/ })).toBeDefined()
     await ui.unmount()
   })
@@ -765,6 +777,265 @@ describe('hooks', () => {
     await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
     expect(await ui.find({ type: 'Text', text: /Egg Lv 1/ })).toBeDefined()
+    await ui.unmount()
+  })
+})
+
+describe('actions tab', () => {
+  const STATS = /Context 62% · 124K \/ 200K · Agents/
+  const ACTION_ROWS = /^(Current action|Agent \d+) - /
+
+  const agentRows = async (ui: { findAll: (q: object) => Promise<unknown[]> }) => (await ui.findAll({ type: 'Text', text: ACTION_ROWS })).length
+
+  test('Actions is the default on both surfaces: Current action - Idle and the context percent', async ($, on) => {
+    const seen = world(on, 62)
+    seen.store.set('save', mon(1, 5000))
+    for (const surface of ['desktop', 'terminal'] as const) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      expect(await ui.find({ key: 'tab-actions' })).toBeDefined()
+      expect(await ui.find({ key: 'tab-levels' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^Current action - Idle$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^62%$/ })).toBeDefined()
+      // None of the Levels content is drawn.
+      expect(await ui.find({ type: 'Text', text: STATS })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /^Pending \+/ })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /^New egg \(/ })).toBeUndefined()
+      await ui.unmount()
+    }
+  })
+
+  test('the title row still has the title, rarity, !hint and dex on the Actions tab', async ($, on) => {
+    const seen = world(on)
+    seen.store.set('save', mon(1, 5000))
+    for (const surface of ['desktop', 'terminal'] as const) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      expect(await ui.find({ type: 'Text', text: /Bulbasaur Lv \d+/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /Starter/ })).toBeDefined()
+      expect(await ui.find({ key: 'hint' })).toBeDefined()
+      expect(await ui.find({ key: 'dex' })).toBeDefined()
+      expect(await ui.find({ key: 'evolve' })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('pressing Levels shows the Levels rows, pressing Actions goes back, on both surfaces', async ($, on) => {
+    const seen = world(on, 62)
+    seen.store.set('save', mon(1, 5000, { pending: 321 }))
+    for (const surface of ['desktop', 'terminal'] as const) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      await ui.press({ key: 'tab-levels' })
+      expect(await ui.find({ type: 'Text', text: STATS })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /321/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^New egg \(0\/25\)$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^Current action - / })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /^62%$/ })).toBeUndefined()
+      await ui.press({ key: 'tab-actions' })
+      expect(await ui.find({ type: 'Text', text: /^Current action - Idle$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: STATS })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /^62%$/ })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('the Advice row shows on both tabs when Evolve is recommended', async ($, on) => {
+    const seen = world(on, 62)
+    seen.store.set('save', mon(1, 5000))
+    for (const surface of ['desktop', 'terminal'] as const) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      expect(await ui.find({ type: 'Text', text: /Evolve recommended/ })).toBeDefined()
+      await ui.press({ key: 'tab-levels' })
+      expect(await ui.find({ type: 'Text', text: /Evolve recommended/ })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('the context percent follows the thresholds in colour on the Actions tab', async ($, on) => {
+    const seen = world(on, 20)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^20%$/ })).toBeDefined()
+    await ui.unmount()
+    await $.session.measure({ context: { tokens: 170_000, window: 200_000, percent: 85 }, rateLimits: [], changed: ['context'] })
+    const hot = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await hot.find({ type: 'Text', text: /^85%$/ })).toBeDefined()
+    await hot.unmount()
+  })
+
+  test('terminal: the Actions band never has more rows than the Levels band, even with many agents', async ($, on) => {
+    const seen = world(on, 62)
+    seen.agents = ['a', 'b', 'c', 'd', 'e', 'f'].map(id => ({ id, description: `job ${id}`, type: 'Explore', status: 'running' as const }))
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    const actions = await agentRows(ui)
+    expect(actions).toBe(3)
+    expect(await ui.find({ type: 'Text', text: /\(\+4 more\)$/ })).toBeDefined()
+    await ui.press({ key: 'tab-levels' })
+    const levels = (await ui.findAll({ type: 'Text', text: /^[█░]{20} |^Pending \+/ })).length
+    expect(levels).toBe(3)
+    expect(actions).toBeLessThanOrEqual(levels)
+    await ui.unmount()
+  })
+
+  test('agents from $.agent.list show as rows; finished ones do not', async ($, on) => {
+    const seen = world(on)
+    seen.agents = [
+      { id: 'a1', name: 'scout', description: 'scan', type: 'Explore', status: 'running' },
+      { id: 'a2', description: 'plan', type: 'Plan', status: 'completed' },
+      { id: 'a3', description: 'review', type: 'Plan', status: 'idle' },
+    ]
+    seen.store.set('save', mon(1, 5000))
+    for (const surface of ['desktop', 'terminal'] as const) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      expect(await ui.find({ type: 'Text', text: /^Agent 1 - scout - scan$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^Agent 2 - Waiting$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /plan/ })).toBeUndefined()
+      expect(await agentRows(ui)).toBe(3)
+      await ui.unmount()
+    }
+  })
+
+  test('a tool call shows its label while in flight and clears after, on both surfaces', async ($, on) => {
+    const seen = world(on)
+    seen.store.set('save', mon(1, 5000))
+    for (const surface of ['desktop', 'terminal'] as const) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      let release: () => void = () => undefined
+      seen.toolGate = new Promise<void>(r => (release = r))
+      const call = $.tool.call({ tool: 'Grep', pattern: 'x', tool_use_id: 'tu-grep' })
+      await new Promise(r => setTimeout(r, 20))
+      const busy = await $.ui.mount({ plugin: PLUGIN, surface, ...WORKING })
+      expect(await busy.find({ type: 'Text', text: /^Current action - Gathering context$/ })).toBeDefined()
+      await busy.unmount()
+      release()
+      await call
+      const after = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      expect(await after.find({ type: 'Text', text: /^Current action - Idle$/ })).toBeDefined()
+      expect(await after.find({ type: 'Text', text: /Gathering context/ })).toBeUndefined()
+      await after.unmount()
+      seen.toolGate = undefined
+    }
+  })
+
+  test('a failing tool call still clears the label', async ($, on) => {
+    const seen = world(on)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    seen.toolResult = () => {
+      throw new Error('tool exploded')
+    }
+    await $.tool.call({ tool: 'Bash', command: 'x', tool_use_id: 'tu-bash' }).catch(() => undefined)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^Current action - Idle$/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a Skill call names the skill', async ($, on) => {
+    const seen = world(on)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    let release: () => void = () => undefined
+    seen.toolGate = new Promise<void>(r => (release = r))
+    const call = $.tool.call({ tool: 'Skill', skill: 'pdf', tool_use_id: 'tu-skill' })
+    await new Promise(r => setTimeout(r, 20))
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...WORKING })
+    expect(await ui.find({ type: 'Text', text: /^Current action - Using pdf skill$/ })).toBeDefined()
+    await ui.unmount()
+    release()
+    await call
+  })
+
+  test('a TodoWrite in_progress item shows as the Current action; none left goes back to Idle', async ($, on) => {
+    const seen = world(on)
+    seen.store.set('save', mon(1, 5000))
+    for (const surface of ['desktop', 'terminal'] as const) {
+      await $.session.start({ cwd: '.', surface, isInteractive: true })
+      await $.tool.call({
+        tool: 'TodoWrite',
+        tool_use_id: 'tu-todo',
+        todos: [
+          { content: 'Write tests', activeForm: 'Writing tests', status: 'in_progress' },
+          { content: 'Ship it', activeForm: 'Shipping it', status: 'pending' },
+        ],
+      })
+      let ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      expect(await ui.find({ type: 'Text', text: /^Current action - Writing tests$/ })).toBeDefined()
+      await ui.unmount()
+      await $.tool.call({
+        tool: 'TodoWrite',
+        tool_use_id: 'tu-todo2',
+        todos: [{ content: 'Write tests', activeForm: 'Writing tests', status: 'completed' }],
+      })
+      ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
+      expect(await ui.find({ type: 'Text', text: /^Current action - Idle$/ })).toBeDefined()
+      await ui.unmount()
+    }
+  })
+
+  test('a TodoWrite item with no activeForm uses its content', async ($, on) => {
+    const seen = world(on)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    await $.tool.call({ tool: 'TodoWrite', tool_use_id: 'tu', todos: [{ content: 'Fix the bug', status: 'in_progress' }] })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^Current action - Fix the bug$/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('TaskCreate then TaskUpdate in_progress names the task; completing it clears it', async ($, on) => {
+    const seen = world(on)
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    seen.toolResult = e => (e.tool === 'TaskCreate' ? { result: { task: { id: '7' } } } : { result: { text: 'ok' } })
+    await $.tool.call({ tool: 'TaskCreate', tool_use_id: 'tc', subject: 'Port the parser', activeForm: 'Porting the parser' })
+    let ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^Current action - Idle$/ })).toBeDefined() // pending, not started
+    await ui.unmount()
+    await $.tool.call({ tool: 'TaskUpdate', tool_use_id: 'tu', taskId: '7', status: 'in_progress' })
+    ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^Current action - Porting the parser$/ })).toBeDefined()
+    await ui.unmount()
+    await $.tool.call({ tool: 'TaskUpdate', tool_use_id: 'tu2', taskId: '7', status: 'completed' })
+    ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^Current action - Idle$/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('a subagent tool call is not mistaken for the main loop, and its TodoWrite sets no task', async ($, on) => {
+    const seen = world(on)
+    seen.agents = [{ id: 'a1', description: 'scan', type: 'Explore', status: 'running' }]
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    let release: () => void = () => undefined
+    seen.toolGate = new Promise<void>(r => (release = r))
+    const call = $.tool.call({ tool: 'Edit', tool_use_id: 'tu-sub', agentId: 'a1' })
+    await new Promise(r => setTimeout(r, 20))
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...WORKING })
+    expect(await ui.find({ type: 'Text', text: /^Current action - Idle$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Agent 1 - Editing files · scan$/ })).toBeDefined()
+    await ui.unmount()
+    release()
+    await call
+    seen.toolGate = undefined
+    await $.tool.call({ tool: 'TodoWrite', tool_use_id: 'tu-sub2', agentId: 'a1', todos: [{ content: 'x', activeForm: 'Sub work', status: 'in_progress' }] })
+    const after = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await after.find({ type: 'Text', text: /Sub work/ })).toBeUndefined()
+    await after.unmount()
+  })
+
+  test('the Actions tab stays quiet when the engine will not list agents', async ($, on) => {
+    const seen = world(on, 62, { noLists: true })
+    seen.store.set('save', mon(1, 5000))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /^Current action - Idle$/ })).toBeDefined()
+    expect(await agentRows(ui)).toBe(1)
     await ui.unmount()
   })
 })

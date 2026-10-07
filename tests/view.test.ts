@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import { DEFAULT_CONFIG, dexView, ensureTarget, newSave, progress, type Entry, type Save } from '../hooks/engine'
+import type { ClawdMonActivity, ClawdMonAgent } from '../types'
 import {
+  actionsRows,
+  activityLabel,
   adviceLine,
   dexRowLine,
   dexRows,
@@ -265,5 +268,146 @@ describe('legendary star and dex text', () => {
     expect(sil).toMatch(/viewBox="/)
     expect(sil.length).toBeLessThan(131_072)
     expect(spriteSvg({ base64: png, size: 48, animate: false })).not.toMatch(/filter/)
+  })
+})
+
+describe('actions tab', () => {
+  const act = (extra: Partial<ClawdMonActivity> = {}): ClawdMonActivity => ({ doing: {}, busy: false, task: null, tasks: {}, ...extra })
+  const agent = (id: string, status: ClawdMonAgent['status'], extra: Partial<ClawdMonAgent> = {}): ClawdMonAgent => ({
+    id,
+    type: 'Explore',
+    description: '',
+    status,
+    ...extra,
+  })
+  const doing = (tool: string, extra: Record<string, unknown> = {}) => ({ callId: 'c', tool, ...extra })
+
+  test('activityLabel maps every tool family to a few words', async () => {
+    const table: Array<[string, string]> = [
+      ['Read', 'Gathering context'],
+      ['Grep', 'Gathering context'],
+      ['Glob', 'Gathering context'],
+      ['LSP', 'Gathering context'],
+      ['ToolSearch', 'Gathering context'],
+      ['Edit', 'Editing files'],
+      ['MultiEdit', 'Editing files'],
+      ['Write', 'Editing files'],
+      ['NotebookEdit', 'Editing files'],
+      ['Bash', 'Running commands'],
+      ['PowerShell', 'Running commands'],
+      ['Monitor', 'Running commands'],
+      ['WebSearch', 'Researching'],
+      ['WebFetch', 'Researching'],
+      ['mcp__srv__thing', 'Researching'],
+      ['Agent', 'Delegating to agents'],
+      ['Task', 'Delegating to agents'],
+      ['TodoWrite', 'Planning'],
+      ['TaskCreate', 'Planning'],
+      ['TaskUpdate', 'Planning'],
+      ['TaskList', 'Planning'],
+      ['TaskGet', 'Planning'],
+      ['Frobnicate', 'Using Frobnicate'],
+    ]
+    for (const [tool, label] of table) expect(activityLabel(tool)).toBe(label)
+    expect(activityLabel('Skill', 'pdf')).toBe('Using pdf skill')
+    expect(activityLabel('Skill')).toBe('Using a skill')
+    expect(activityLabel('Read', 'pdf')).toBe('Gathering context') // a skill name only matters for Skill
+  })
+
+  test('main row: Idle, Thinking, then a tool, then waiting on an agent, then the task', async () => {
+    expect(actionsRows(act(), [], 3, 72)).toEqual(['Current action - Idle'])
+    expect(actionsRows(act({ busy: true }), [], 3, 72)).toEqual(['Current action - Thinking'])
+    expect(actionsRows(act({ busy: true, doing: { '': doing('Edit') } }), [], 3, 72)).toEqual(['Current action - Editing files'])
+    expect(actionsRows(act({ doing: { '': doing('Skill', { skill: 'pdf' }) } }), [], 3, 72)).toEqual(['Current action - Using pdf skill'])
+    const agents = [agent('x', 'running'), agent('y', 'running')]
+    expect(actionsRows(act({ busy: true, doing: { '': doing('Agent', { waitingOn: 'y' }) } }), agents, 3, 72)[0]).toBe(
+      'Current action - Waiting on Agent 2',
+    )
+    expect(
+      actionsRows(act({ task: 'Fixing the bug', busy: true, doing: { '': doing('Agent', { waitingOn: 'x' }) } }), agents, 3, 72)[0],
+    ).toBe('Current action - Fixing the bug')
+  })
+
+  test('waiting on an agent that is no longer live names no number', async () => {
+    const rows = actionsRows(act({ doing: { '': doing('Agent', { waitingOn: 'gone' }) } }), [agent('gone', 'completed')], 3, 72)
+    expect(rows).toEqual(['Current action - Waiting on an agent'])
+  })
+
+  test('agent rows: name, skill, tool, waiting on Agent N, and the states without a tool', async () => {
+    const agents = [
+      agent('a', 'running', { name: 'scout', description: 'Scan the repo' }),
+      agent('b', 'running', { description: 'Write docs' }),
+      agent('c', 'running', { description: 'Plan work' }),
+      agent('d', 'running', { description: 'Parent' }),
+      agent('e', 'idle', { description: 'x' }),
+      agent('f', 'waiting', { description: 'x' }),
+      agent('g', 'pending', { description: 'x' }),
+      agent('h', 'running'),
+      agent('i', 'running', { description: 'Just a description' }),
+    ]
+    const state = act({
+      doing: {
+        a: doing('Grep'),
+        b: doing('Skill', { skill: 'docs' }),
+        c: doing('Edit'),
+        d: doing('Agent', { waitingOn: 'a' }),
+      },
+    })
+    expect(actionsRows(state, agents, 99, 200)).toEqual([
+      'Current action - Idle',
+      'Agent 1 - scout - Gathering context · Scan the repo',
+      'Agent 2 - Using docs skill to write docs',
+      'Agent 3 - Editing files · Plan work',
+      'Agent 4 - Waiting on Agent 1',
+      'Agent 5 - Waiting',
+      'Agent 6 - Waiting',
+      'Agent 7 - Starting',
+      'Agent 8 - Working',
+      'Agent 9 - Just a description',
+    ])
+  })
+
+  test('a tool with no description shows the label alone; a skill with none shows the skill', async () => {
+    const rows = actionsRows(act({ doing: { a: doing('Bash'), b: doing('Skill', { skill: 'pdf' }) } }), [agent('a', 'running'), agent('b', 'running')], 9, 72)
+    expect(rows.slice(1)).toEqual(['Agent 1 - Running commands', 'Agent 2 - Using pdf skill'])
+  })
+
+  test('completed, failed and killed agents get no row and no number', async () => {
+    const agents = [
+      agent('a', 'completed', { description: 'done' }),
+      agent('b', 'failed', { description: 'broke' }),
+      agent('c', 'killed', { description: 'stopped' }),
+      agent('d', 'running', { description: 'live' }),
+    ]
+    expect(actionsRows(act(), agents, 9, 72)).toEqual(['Current action - Idle', 'Agent 1 - live'])
+  })
+
+  test('the budget caps the rows and folds the rest into (+N more) on the last row', async () => {
+    const agents = ['a', 'b', 'c', 'd', 'e'].map(id => agent(id, 'running', { description: `job ${id}` }))
+    expect(actionsRows(act(), agents, 3, 72)).toEqual(['Current action - Idle', 'Agent 1 - job a', 'Agent 2 - job b (+3 more)'])
+    expect(actionsRows(act(), agents.slice(0, 2), 3, 72)).toHaveLength(3) // exactly the budget: no fold
+    expect(actionsRows(act(), agents.slice(0, 2), 3, 72).join('')).not.toMatch(/more/)
+    expect(actionsRows(act(), agents, 1, 72)).toEqual(['Current action - Idle (+5 more)'])
+    expect(actionsRows(act(), agents, 0, 72)).toHaveLength(1) // a budget under one still shows the main row
+  })
+
+  test('every row fits the width, folded or not; a clipped row ends in an ellipsis', async () => {
+    const long = 'x'.repeat(200)
+    const agents = ['a', 'b', 'c', 'd'].map(id => agent(id, 'running', { name: 'n', description: long }))
+    for (const width of [20, 40, 72]) {
+      for (const budget of [1, 2, 3, 6]) {
+        const rows = actionsRows(act({ task: long }), agents, budget, width)
+        expect(rows.length).toBeLessThanOrEqual(budget)
+        for (const r of rows) expect(r.length).toBeLessThanOrEqual(width)
+      }
+    }
+    const rows = actionsRows(act({ task: long }), agents, 3, 72)
+    expect(rows[0]!.endsWith('…')).toBe(true)
+    expect(rows[2]!).toMatch(/… \(\+2 more\)$/)
+  })
+
+  test('a row that already fits is not clipped', async () => {
+    expect(actionsRows(act(), [], 3, 72)[0]).toBe('Current action - Idle')
+    expect(actionsRows(act(), [], 3, 'Current action - Idle'.length)[0]).toBe('Current action - Idle')
   })
 })
