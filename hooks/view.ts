@@ -8,6 +8,8 @@ export const GREEN = '#4CAF50'
 export const AMBER = '#E0A030'
 export const RED = '#E5534B'
 export const TRACK = '#80808040'
+/** Where the Evolve button was: a compact is how the companion grows. */
+export const COMPACT_HINT = '/compact to level up'
 /** Banner fill per tier; white text on each stays readable. */
 export const RARITY_COLOR: Record<Rarity, string> = {
   starter: '#C2410C',
@@ -85,7 +87,8 @@ export function titleOf(p: Progress): string {
 
 export function xpLine(p: Progress): string {
   if (p.kind === 'egg') {
-    return p.need > 0 ? `XP ${Math.floor(p.into)}/${Math.floor(p.need)}` : 'XP full'
+    // Full: only a counted compact moves it on now. Which stage comes next stays a surprise.
+    return p.need > 0 ? `XP ${Math.floor(p.into)}/${Math.floor(p.need)}` : 'Ready to evolve'
   }
   return `XP ${Math.floor(p.into)}/${Math.floor(p.need)}`
 }
@@ -106,10 +109,10 @@ export function adviceLine(
   if (!rec.recommend) return ''
   const percent = usage?.percent
   if (percent !== undefined && percent >= cfg.dangerPercent) {
-    return `Evolve recommended: pending XP decays 2% a turn at ${percent}%`
+    return `/compact recommended: pending XP decays 2% a turn at ${percent}%`
   }
-  if (rec.reason === 'projected') return 'Evolve recommended: context is filling fast'
-  return `Evolve recommended: context at ${percent}%`
+  if (rec.reason === 'projected') return '/compact recommended: context is filling fast'
+  return `/compact recommended: context at ${percent}%`
 }
 
 export function eventToast(ev: GameEvent, dex: Dex): string {
@@ -205,7 +208,7 @@ export function actionsRows(act: ClawdMonActivity, agents: ClawdMonAgent[], budg
 /** What the help says, without level spoilers. */
 export function hintRules(cfg: Pick<Config, 'dangerPercent'>): string[] {
   return [
-    'Evolve = compact + apply pending XP. Only compacts at 40%+ context count.',
+    '/compact to level up: it applies pending XP. Only compacts at 40%+ context count.',
     `Pending XP decays 2%/turn at ${cfg.dangerPercent}%+ context.`,
     'Only the active Pokémon or egg gains XP.',
     'New egg: fully evolve the active one, or every 25 counted compacts.',

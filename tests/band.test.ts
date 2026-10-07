@@ -31,11 +31,11 @@ const COMMAND = {
 const BOUNDS = { '1': [28, 30, 35, 33], egg: [34, 34, 28, 30] }
 const MESSAGES = [{ role: 'user' as const, text: 'hello', toolUses: [] }]
 
-type Counters = { compacts: number; queuedCompacts: number; runQueued?: boolean; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown>; agents?: Array<{ id: string; name?: string; description: string; type: string; status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed' }>; toolGate?: Promise<void>; toolResult?: (e: { tool: string }) => unknown }
+type Counters = { compacts: number; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown>; agents?: Array<{ id: string; name?: string; description: string; type: string; status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed' }>; toolGate?: Promise<void>; toolResult?: (e: { tool: string }) => unknown }
 
 /** The engine beneath the plugin: fixed usage, the data files, a sprite, a compact that works. */
-function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: boolean; compactRejects?: string; headless?: boolean } = {}): Counters {
-  const seen: Counters = { compacts: 0, queuedCompacts: 0, spriteReads: [], toasts: [], saveReads: 0, store: new Map() }
+function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: boolean } = {}): Counters {
+  const seen: Counters = { compacts: 0, spriteReads: [], toasts: [], saveReads: 0, store: new Map() }
   on('store.get', (_$, e) => {
     if (e.key === 'save') seen.onSaveRead?.(++seen.saveReads)
     return { value: seen.store.get(e.key) }
@@ -105,19 +105,10 @@ function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: b
     }
     throw new Error(`unexpected read ${e.path}`)
   })
-  // Headless (-p / SDK, the desktop Code tab): a plugin's own compact is refused; /compact is queued instead.
   on('session.compact', () => {
-    if (options.compactRejects) throw new Error(options.compactRejects)
-    if (options.headless && !seen.runQueued) throw new Error('not available in a headless (-p / SDK) session yet')
     seen.compacts += 1
     return { messages: [{ role: 'user' as const, text: 'summary', toolUses: [] }] }
   })
-  if (options.headless) {
-    on('command.run', { command: 'compact' }, () => {
-      seen.queuedCompacts += 1
-      return {}
-    })
-  }
   on('ui.render', ($, e) => {
     const { Box } = $.ui.resolve(e)
     return Box({})
@@ -153,7 +144,7 @@ function hatchedEntry(id: string, speciesId: number, xp: number): Entry {
 }
 
 describe('band', () => {
-  test('desktop draws the sprite, name, level and an Evolve button', async ($, on) => {
+  test('desktop draws the sprite, name, level and the /compact hint', async ($, on) => {
     const seen = world(on)
     seen.store.set('save', mon(1, 5000, { pending: 321 }))
     await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
@@ -163,7 +154,7 @@ describe('band', () => {
     expect(await ui.find({ type: 'Text', text: /Bulbasaur/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Lv \d+/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /321/ })).toBeDefined()
-    expect(await ui.find({ key: 'evolve' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^\/compact to level up$/ })).toBeDefined()
     expect(await ui.find({ key: 'hide' })).toBeDefined()
     expect(seen.spriteReads.some(p => p.endsWith('1.png'))).toBe(true)
     await ui.unmount()
@@ -178,7 +169,7 @@ describe('band', () => {
     expect(await ui.find({ type: 'Image' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Bulbasaur/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /321/ })).toBeDefined()
-    expect(await ui.find({ key: 'evolve' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^\/compact to level up$/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -262,16 +253,16 @@ describe('band', () => {
       await $.session.start({ cwd: '.', surface, isInteractive: true })
       const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND, props: { ...BAND.props, maxRows: 40 } })
       expect(await ui.find({ key: 'hint-cancel' })).toBeUndefined()
-      expect(await ui.find({ type: 'Text', text: /Evolve = compact/ })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /\/compact to level up:/ })).toBeUndefined()
       await ui.press({ key: 'hint' })
-      expect(await ui.find({ type: 'Text', text: /Evolve = compact \+ apply pending XP/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /\/compact to level up: it applies pending XP/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /decays 2%\/turn at 80%\+/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /\/clawd-mon switch <name\|#>/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /\/clawd-mon reset-all confirm/ })).toBeDefined()
       expect(await ui.find({ key: 'hint-cancel' })).toBeDefined()
       await ui.press({ key: 'hint-cancel' })
       expect(await ui.find({ key: 'hint-cancel' })).toBeUndefined()
-      expect(await ui.find({ type: 'Text', text: /Evolve = compact/ })).toBeUndefined()
+      expect(await ui.find({ type: 'Text', text: /\/compact to level up:/ })).toBeUndefined()
       await ui.unmount()
     }
   })
@@ -484,7 +475,7 @@ describe('band', () => {
     seen.store.set('save', mon(1, 5000))
     await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
     let ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
-    expect(await ui.find({ type: 'Text', text: /Evolve recommended/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\/compact recommended/ })).toBeDefined()
     await ui.unmount()
     await $.session.measure({
       context: { tokens: 40_000, window: 200_000, percent: 20 },
@@ -492,87 +483,7 @@ describe('band', () => {
       changed: ['context'],
     })
     ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
-    expect(await ui.find({ type: 'Text', text: /Evolve recommended/ })).toBeUndefined()
-    await ui.unmount()
-  })
-
-  test('Evolve compacts and applies the pending XP on both surfaces', async ($, on) => {
-    const seen = world(on)
-    for (const surface of ['desktop', 'terminal'] as const) {
-      seen.compacts = 0
-      seen.toasts.length = 0
-      seen.store.set('save', mon(25, 0, { pending: 1000, compacts: 0 }))
-      await $.session.start({ cwd: '.', surface, isInteractive: true })
-      const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
-      await ui.press({ key: 'evolve' })
-      expect(seen.compacts).toBe(1)
-      const saved = seen.store.get('save') as Save
-      expect(saved.pending).toBe(0)
-      expect(A(saved).xp).toBe(1000)
-      expect(A(saved).compacts).toBe(1) // 62% context qualifies
-      expect(saved.lifetime.compacts).toBe(1) // applied once, not twice
-      expect(seen.toasts.filter(x => /Level up/.test(x)).length).toBeLessThanOrEqual(1)
-      await ui.unmount()
-    }
-  })
-
-  test('one Evolve press moves an egg at most one stage and applies once', async ($, on) => {
-    const seen = world(on, 70)
-    seen.store.set('save', make({ target: 4 }, { pending: 5000 }))
-    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
-    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
-    await ui.press({ key: 'evolve' })
-    const saved = seen.store.get('save') as Save
-    expect(seen.compacts).toBe(1)
-    expect(A(saved).eggStage).toBe(1)
-    expect(saved.lifetime.compacts).toBe(1)
-    expect(A(saved).compacts).toBe(1)
-    expect(seen.toasts.filter(x => x === 'The egg is cracking')).toHaveLength(1)
-    await ui.unmount()
-  })
-
-  test('Evolve does nothing while a turn is running', async ($, on) => {
-    const seen = world(on)
-    seen.store.set('save', mon(25, 0, { pending: 1000 }))
-    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
-    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...WORKING })
-    await ui.press({ key: 'evolve' })
-    expect(seen.compacts).toBe(0)
-    expect((seen.store.get('save') as Save).pending).toBe(1000)
-    await ui.unmount()
-  })
-
-  test('headless: Evolve falls back to a queued /compact and applies the bank once', async ($, on) => {
-    const seen = world(on, 62, { headless: true })
-    seen.store.set('save', mon(25, 0, { pending: 1000, compacts: 0 }))
-    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
-    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
-    await ui.press({ key: 'evolve' })
-    expect(seen.queuedCompacts).toBe(1)
-    expect(seen.compacts).toBe(0)
-    expect(seen.toasts.some(t => /could not compact/.test(t))).toBe(false)
-    expect((seen.store.get('save') as Save).pending).toBe(1000) // nothing applied until it runs
-    // The engine runs the queued /compact once idle: the session.compact hook applies the bank.
-    seen.runQueued = true
-    await $.session.compact({ trigger: 'manual', messages: MESSAGES })
-    expect(seen.compacts).toBe(1)
-    const saved = seen.store.get('save') as Save
-    expect(saved.pending).toBe(0)
-    expect(A(saved).xp).toBe(1000)
-    expect(saved.lifetime.compacts).toBe(1) // applied once, not twice
-    await ui.unmount()
-  })
-
-  test('a refused compact says why and keeps the bank', async ($, on) => {
-    const seen = world(on, 62, { compactRejects: 'a turn is running' })
-    seen.store.set('save', mon(25, 0, { pending: 1000 }))
-    await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
-    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
-    await ui.press({ key: 'evolve' })
-    // The engine skips a throwing hook, so the rejection the plugin sees is whatever the chain ends in;
-    // what matters is that its reason reaches the toast instead of being swallowed.
-    expect(seen.toasts.some(t => /^Clawd-mon: could not compact right now \(.+\)\.$/.test(t))).toBe(true)
-    expect((seen.store.get('save') as Save).pending).toBe(1000)
+    expect(await ui.find({ type: 'Text', text: /\/compact recommended/ })).toBeUndefined()
     await ui.unmount()
   })
 
@@ -585,11 +496,11 @@ describe('band', () => {
     expect(seen.store.get('isHidden')).toBe(true)
     await ui.unmount()
     ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
-    expect(await ui.find({ key: 'evolve' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^\/compact to level up$/ })).toBeUndefined()
     await $.command.run({ command: PLUGIN, args: 'show', ...COMMAND })
     await ui.unmount()
     ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
-    expect(await ui.find({ key: 'evolve' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^\/compact to level up$/ })).toBeDefined()
     await ui.unmount()
   })
 
@@ -603,7 +514,7 @@ describe('band', () => {
       ...BAND,
       props: { ...BAND.props, hasSurvey: true },
     })
-    expect(await ui.find({ key: 'evolve' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^\/compact to level up$/ })).toBeUndefined()
     await ui.unmount()
   })
 })
@@ -815,7 +726,7 @@ describe('actions tab', () => {
       expect(await ui.find({ type: 'Text', text: /Starter/ })).toBeDefined()
       expect(await ui.find({ key: 'hint' })).toBeDefined()
       expect(await ui.find({ key: 'dex' })).toBeDefined()
-      expect(await ui.find({ key: 'evolve' })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^\/compact to level up$/ })).toBeDefined()
       await ui.unmount()
     }
   })
@@ -840,15 +751,15 @@ describe('actions tab', () => {
     }
   })
 
-  test('the Advice row shows on both tabs when Evolve is recommended', async ($, on) => {
+  test('the Advice row shows on both tabs when a compact is recommended', async ($, on) => {
     const seen = world(on, 62)
     seen.store.set('save', mon(1, 5000))
     for (const surface of ['desktop', 'terminal'] as const) {
       await $.session.start({ cwd: '.', surface, isInteractive: true })
       const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
-      expect(await ui.find({ type: 'Text', text: /Evolve recommended/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /\/compact recommended/ })).toBeDefined()
       await ui.press({ key: 'tab-levels' })
-      expect(await ui.find({ type: 'Text', text: /Evolve recommended/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /\/compact recommended/ })).toBeDefined()
       await ui.unmount()
     }
   })

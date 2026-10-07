@@ -23,6 +23,8 @@ import {
   rarity,
 } from '../hooks/engine.ts'
 import {
+  AMBER,
+  COMPACT_HINT,
   GREEN,
   TRACK,
   RARITY_COLOR,
@@ -138,7 +140,7 @@ function desktopBand({ save, usage: u, label, hint = false, tab = 'levels', acti
     }
     ${advice ? `<div class="advice">${esc(advice)}</div>` : ''}
   </div>
-  <div class="btns"><button class="${rec.recommend ? 'primary' : ''}">Evolve</button><button class="x">×</button></div>
+  <div class="btns"><span class="sub" style="${rec.recommend ? `color:${AMBER};font-weight:600;opacity:1` : ''}">${esc(COMPACT_HINT)}</span><button class="x">×</button></div>
 </div>${hint ? `<div class="help">${hintRows(cfg, 99).map(r => `<div>${esc(r)}</div>`).join('')}<button>Cancel</button></div>` : ''}`
 }
 
@@ -154,7 +156,7 @@ function terminalBand({ save, usage: u, hint = false, maxRows = 12, tab = 'level
   const actionRows = isActions && activity ? actionsRows(activity, agents, 3, 72) : []
   const rows = []
   // First row: sprite, tabs, title, rarity, context/milestone, buttons
-  const titleLine = `${titleOf(p)}${rarityText} ${isActions ? ctxPercent : ''} !hint dex [ Evolve ] ×`
+  const titleLine = `${titleOf(p)}${rarityText} ${isActions ? ctxPercent : ''} !hint dex ${COMPACT_HINT} ×`
   rows.push(`┌────────┐  Actions Levels  ${titleLine}`.slice(0, 100))
   if (isActions && activity) {
     // Actions tab: show action rows
@@ -181,7 +183,8 @@ const caterpie = 10
 const SCENARIOS = [
   { caption: 'Fresh egg, Lv 1. Random species stays hidden.', bands: [{ save: egg(1, 1, { stage: 0 }), usage: usage(2, 1_000_000) }] },
   { caption: 'Egg, first crack: one crack line on the shell.', bands: [{ save: egg(25, crackLevels(hatchLevel(species(25)))[0], { pending: 240 }), usage: usage(31, 200_000) }] },
-  { caption: 'Egg, second crack (about to hatch), context 65%: Evolve recommended.', bands: [{ save: egg(4, crackLevels(hatchLevel(species(4)))[1], { pending: 1450 }), usage: usage(65, 200_000) }] },
+  { caption: 'Egg, second crack (about to hatch), context 65%: /compact recommended.', bands: [{ save: egg(4, crackLevels(hatchLevel(species(4)))[1], { pending: 1450 }), usage: usage(65, 200_000) }] },
+  { caption: 'Egg XP at its hatch level: Ready to evolve, only a counted /compact moves it on.', bands: [{ save: egg(81, hatchLevel(species(81)), { stage: 2 }), usage: usage(30, 200_000) }] },
   { caption: 'Egg chosen with /clawd-mon choose bulbasaur: the name shows. Mid-level.', bands: [{ save: egg(1, 3, { chosen: true, pending: 180 }), usage: usage(18, 1_000_000) }] },
   { caption: 'Just hatched: Bulbasaur Lv 5.', bands: [{ save: mon(1, 5, { fraction: 0.02 }), usage: usage(4, 1_000_000) }] },
   { caption: 'Ivysaur Lv 22, 3 of 8 compacts for Venusaur.', bands: [{ save: mon(2, 22, { compacts: 3, pending: 620 }), usage: usage(38, 200_000) }] },

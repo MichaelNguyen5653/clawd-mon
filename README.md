@@ -2,7 +2,7 @@
 
 Pokémon companion above the Claude Code prompt. Starts as an egg. Grows on tokens you spend. Unofficial fan project.
 
-Tokens bank as **pending XP**. **Evolve** = compact the conversation + apply the bank. Long context? It tells you when to compact.
+Tokens bank as **pending XP**. **`/compact` to level up**: a compact applies the bank. Long context? It tells you when to compact.
 
 ## Install
 
@@ -28,7 +28,7 @@ Needs a Claude Code build with function hooks (plugin `modules`). Desktop draws 
 |---|---|
 | XP source | New tokens per turn (input + output + cache writes; cache reads excluded). `xpRate` XP per 1,000 tokens (default 1). Fallback: positive context growth |
 | Pending | Tokens bank as pending. Not applied until a compact |
-| Apply | Evolve button / manual `/compact` / plugin: 100%. Auto-compact: 50%, rest forfeited |
+| Apply | Manual `/compact` / plugin: 100%. Auto-compact: 50%, rest forfeited. The band shows `/compact to level up` (amber when recommended) |
 | Decay | Context ≥ `dangerPercent` (80): pending −2% per completed turn |
 | Recommend | Context ≥ `recommendPercent` (60), or avg growth (last 5 turns) projects ≥ 80% within 3 turns |
 | Qualifying compact | Context ≥ 40% when it ran. Counts toward gates. Lower: XP still applies |
@@ -41,7 +41,7 @@ Needs a Claude Code build with function hooks (plugin `modules`). Desktop draws 
 | Bonus eggs | +1 egg when the active one evolves into a final form (origin `evolved`); +1 once when a single-stage species hits Lv 40 (`mastery`); +1 every 25 counted compacts. New eggs wait in the box, never auto-active. Band shows `New egg (n/25)` and `Box N` |
 | Pace | Bulbasaur → Venusaur ≈ 30 days at ~1.5M tokens/day, one compact a day alternating manual/auto (23 days all manual) |
 
-Evolve is a no-op with a toast while a turn runs. Evolution is checked at compact time only.
+Evolution is checked at compact time only. An egg whose XP has reached its hatch level shows `Ready to evolve`: only a counted compact moves it on.
 
 ## Band tabs
 
@@ -103,7 +103,7 @@ Plugin options (`/config`):
 | Key | Default | |
 |---|---|---|
 | `xpRate` | 1 | XP per 1,000 tokens |
-| `recommendPercent` | 60 | recommend Evolve at this context % |
+| `recommendPercent` | 60 | recommend `/compact` at this context % |
 | `dangerPercent` | 80 | decay starts at this context % |
 
 ## Dev

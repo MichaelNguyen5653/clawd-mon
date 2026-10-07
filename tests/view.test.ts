@@ -87,6 +87,14 @@ describe('egg text gives no hints', () => {
     expect(pendingLine(p)).toBe('Pending +40 XP')
   })
 
+  test('a full egg says it is ready, not "XP full"; still no stage spoiler', async () => {
+    // Bulbasaur hatches at Lv 5 (3000 egg XP); past that only a counted compact moves it on.
+    for (const stage of [0, 1, 2] as const) {
+      const p = progress(egg(5000, stage, { target: 1 }), DEX)
+      expect(xpLine(p)).toBe('Ready to evolve')
+    }
+  })
+
   test('toasts are neutral for both cracks', async () => {
     expect(eventToast({ kind: 'crack', stage: 1 }, DEX)).toBe('The egg is cracking')
     expect(eventToast({ kind: 'crack', stage: 2 }, DEX)).toBe('The egg is cracking')
@@ -155,7 +163,7 @@ describe('advice', () => {
   const usage = (percent: number) => ({ tokens: percent * 2000, window: 200_000, percent })
   test('quiet, high, projected and danger', async () => {
     expect(adviceLine({ recommend: false, reason: null }, usage(20), DEFAULT_CONFIG)).toBe('')
-    expect(adviceLine({ recommend: true, reason: 'high' }, usage(65), DEFAULT_CONFIG)).toMatch(/Evolve recommended.*65%/)
+    expect(adviceLine({ recommend: true, reason: 'high' }, usage(65), DEFAULT_CONFIG)).toMatch(/\/compact recommended.*65%/)
     expect(adviceLine({ recommend: true, reason: 'projected' }, usage(50), DEFAULT_CONFIG)).toMatch(/filling fast/)
     expect(adviceLine({ recommend: true, reason: 'high' }, usage(85), DEFAULT_CONFIG)).toMatch(/decays 2%/)
   })
