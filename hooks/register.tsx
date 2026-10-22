@@ -8,6 +8,7 @@
 //   session.measure   keep the context reading fresh for the band
 //   turn.complete     bank the turn's tokens, decay pending in a crowded context
 //   session.compact   apply pending for compacts someone else started (manual, auto)
+//   classic.PostCompact  the same, when a managed plugin's next.to skipped session.compact
 //   command.run       /clawd-mon [show|hide|status|choose|branch|reset|reset-all]
 //   ui.render         the AbovePrompt band (Svg sprite on desktop, Image in the terminal)
 //
@@ -163,6 +164,8 @@ async function today($: EngineInterface): Promise<string> {
 
 let cfg: Config = DEFAULT_CONFIG
 let reducedMotion = false
+/** Set while our session.compact link handles a compact, so its PostCompact applies nothing more. */
+let compactHooked = false
 let chain: Promise<unknown> = Promise.resolve()
 
 /** Saves change one at a time: each re-reads the store, so sessions share one companion. */
@@ -481,13 +484,27 @@ export const register: Register = (on, options) => {
     return done
   })
 
-  // The one place the bank is applied: every compact (/compact, auto, another plugin's) comes through here.
+  // The bank is applied here for every compact (/compact, auto, another plugin's) that reaches this tier.
   on('session.compact', async ($, e, next) => {
     if (e.agentId !== undefined || e.trigger === 'precompute') return next(e)
     const percent = await currentPercent($)
+    compactHooked = true
     const result = await next(e)
-    if ('skip' in result) return result
+    if ('skip' in result) {
+      compactHooked = false
+      return result
+    }
     await quietly(applyFinishedCompact($, e.trigger, percent))
+    return result
+  })
+
+  // A managed plugin's `next.to` can carry session.compact past this tier (cc-plugin-sec-default does);
+  // PostCompact still reports the compact, so the bank is applied here when the hook above never ran.
+  on('classic.PostCompact', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agent_id !== undefined) return result
+    if (compactHooked) compactHooked = false
+    else await quietly(applyFinishedCompact($, e.trigger, (await read($, usageAtom))?.percent))
     return result
   })
 
