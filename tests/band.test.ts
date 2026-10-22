@@ -31,7 +31,7 @@ const COMMAND = {
 const BOUNDS = { '1': [28, 30, 35, 33], egg: [34, 34, 28, 30] }
 const MESSAGES = [{ role: 'user' as const, text: 'hello', toolUses: [] }]
 
-type Counters = { compacts: number; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown>; agents?: Array<{ id: string; name?: string; description: string; type: string; status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed' }>; toolGate?: Promise<void>; toolResult?: (e: { tool: string }) => unknown }
+type Counters = { compacts: number; compacted?: boolean; compactGate?: Promise<void>; onCompactCommand?: () => void; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown>; agents?: Array<{ id: string; name?: string; description: string; type: string; status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed' }>; toolGate?: Promise<void>; toolResult?: (e: { tool: string }) => unknown }
 
 /** The engine beneath the plugin: fixed usage, the data files, a sprite, a compact that works. */
 function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: boolean } = {}): Counters {
@@ -53,7 +53,8 @@ function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: b
   on('session.usage', () => ({
     value: {
       startedAt: 0,
-      context: { tokens: percent * 2000, window: 200_000, percent },
+      // A compacted conversation has no reading until its next response.
+      context: seen.compacted ? { window: 200_000 } : { tokens: percent * 2000, window: 200_000, percent },
       rateLimits: [],
     },
   }))
@@ -113,7 +114,6 @@ function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: b
     const { Box } = $.ui.resolve(e)
     return Box({})
   })
-  on('classic.PostCompact', () => ({}))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('ui.toast', (_$, e) => {
@@ -584,44 +584,57 @@ describe('hooks', () => {
     expect(A(saved).xp).toBe(200)
   })
 
-  // A managed plugin whose `next.to` jumps past the user tier, as cc-plugin-sec-default does.
-  const BYPASS = {
-    name: 'cc-plugin-sec-default',
-    tier: 'prepend',
-    register(on) {
-      on('session.compact', (_$, e, next) => next.to(e, 'append'))
-    },
-  } as const
+  /**
+   * The engine's /compact. On a managed machine sec-default carries session.compact past clawd-mon, so by
+   * default the compact runs where no hook sees it; a test that wants the hook to see it sets `compactGate`
+   * and runs `$.session.compact` itself while the command is in flight.
+   */
+  function compactCommand(on: On, seen: Counters, refused = false): void {
+    on('command.run', { command: 'compact' }, async () => {
+      seen.onCompactCommand?.()
+      await seen.compactGate
+      if (refused) return { text: 'Not enough messages to compact.' }
+      seen.compacted = true
+      return { text: 'Compacted' }
+    })
+  }
 
-  test('a compact that bypasses the session.compact hook applies the bank on PostCompact', { plugins: [BYPASS] }, async ($, on) => {
+  test('a /compact whose session.compact never reached the hook applies the bank', async ($, on) => {
     const seen = world(on, 70)
+    compactCommand(on, seen)
     seen.store.set('save', mon(25, 0, { pending: 400 }))
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
-    await $.session.compact({ trigger: 'manual', messages: MESSAGES })
-    expect((seen.store.get('save') as Save).pending).toBe(400)
-    await $.classic.PostCompact({ trigger: 'manual', compact_summary: 'summary' })
+    await $.command.run({ command: 'compact', args: '', ...COMMAND })
     const saved = seen.store.get('save') as Save
     expect(saved.pending).toBe(0)
     expect(A(saved).xp).toBe(400)
     expect(saved.lifetime.compacts).toBe(1) // the percent before the compact (70%) still counts
   })
 
-  test('PostCompact after a compact the hook already applied applies nothing more', async ($, on) => {
+  test('a /compact the session.compact hook saw applies once', async ($, on) => {
     const seen = world(on, 70)
+    compactCommand(on, seen)
     seen.store.set('save', mon(25, 0, { pending: 400 }))
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    let release = () => {}
+    seen.compactGate = new Promise(r => (release = r))
+    const entered = new Promise<void>(r => (seen.onCompactCommand = r))
+    const ran = $.command.run({ command: 'compact', args: '', ...COMMAND })
+    await entered
     await $.session.compact({ trigger: 'manual', messages: MESSAGES })
-    await $.classic.PostCompact({ trigger: 'manual', compact_summary: 'summary' })
+    release()
+    await ran
     const saved = seen.store.get('save') as Save
     expect(A(saved).xp).toBe(400)
     expect(saved.lifetime.compacts).toBe(1)
   })
 
-  test('a subagent PostCompact applies nothing', { plugins: [BYPASS] }, async ($, on) => {
+  test('a refused /compact applies nothing', async ($, on) => {
     const seen = world(on, 70)
+    compactCommand(on, seen, true)
     seen.store.set('save', mon(25, 0, { pending: 400 }))
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
-    await $.classic.PostCompact({ trigger: 'auto', compact_summary: 'summary', agent_id: 'a1' })
+    await $.command.run({ command: 'compact', args: '', ...COMMAND })
     expect((seen.store.get('save') as Save).pending).toBe(400)
   })
 

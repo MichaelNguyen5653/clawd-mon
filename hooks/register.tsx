@@ -8,8 +8,8 @@
 //   session.measure   keep the context reading fresh for the band
 //   turn.complete     bank the turn's tokens, decay pending in a crowded context
 //   session.compact   apply pending for compacts someone else started (manual, auto)
-//   classic.PostCompact  the same, when a managed plugin's next.to skipped session.compact
 //   command.run       /clawd-mon [show|hide|status|choose|branch|reset|reset-all]
+//   command.run       /compact: apply pending when sec-default carried session.compact past us
 //   ui.render         the AbovePrompt band (Svg sprite on desktop, Image in the terminal)
 //
 // One save lives in $.store under "save" and is re-read before every change, so every
@@ -164,7 +164,7 @@ async function today($: EngineInterface): Promise<string> {
 
 let cfg: Config = DEFAULT_CONFIG
 let reducedMotion = false
-/** Set while our session.compact link handles a compact, so its PostCompact applies nothing more. */
+/** Set when our session.compact link saw a compact, so the /compact command applies nothing more. */
 let compactHooked = false
 let chain: Promise<unknown> = Promise.resolve()
 
@@ -490,22 +490,23 @@ export const register: Register = (on, options) => {
     const percent = await currentPercent($)
     compactHooked = true
     const result = await next(e)
-    if ('skip' in result) {
-      compactHooked = false
-      return result
-    }
+    if ('skip' in result) return result
     await quietly(applyFinishedCompact($, e.trigger, percent))
     return result
   })
 
-  // A managed plugin's `next.to` can carry session.compact past this tier (cc-plugin-sec-default does);
-  // PostCompact still reports the compact, so the bank is applied here when the hook above never ran.
-  on('classic.PostCompact', async ($, e, next) => {
-    const result = await next(e)
-    if (e.agent_id !== undefined) return result
-    if (compactHooked) compactHooked = false
-    else await quietly(applyFinishedCompact($, e.trigger, (await read($, usageAtom))?.percent))
-    return result
+  // Claude Code's sec-default plugin carries session.compact (and every classic.* event) past this tier
+  // on managed machines; a typed /compact still reaches command.run. A compact that ran leaves no context
+  // reading until the next response, and one that was refused leaves it standing.
+  on('command.run', { command: 'compact' }, async ($, e, next) => {
+    const before = await $.session.usage().then(u => u.context, () => undefined)
+    compactHooked = false
+    const out = await next(e)
+    const after = await $.session.usage().then(u => u.context, () => undefined)
+    if (!compactHooked && before?.tokens !== undefined && after !== undefined && after.tokens === undefined) {
+      await quietly(applyFinishedCompact($, 'manual', before.percent))
+    }
+    return out
   })
 
   on('command.run', { command: COMMAND }, async ($, e) => {
