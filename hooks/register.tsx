@@ -83,6 +83,7 @@ const AGENT_TICK_MS = 4000
 const COMMAND = 'clawd-mon'
 const SAVE_KEY = 'save'
 const HIDDEN_KEY = 'isHidden'
+const COMPACT_KEY = 'compactAwaited'
 const SPRITE_PX = 80
 
 // ---------- engine reads ----------
@@ -337,6 +338,20 @@ function applyFinishedCompact(
   })
 }
 
+/**
+ * A /compact whose session.compact went past this tier: the first reading that differs from the one
+ * kept at the command settles it. A smaller one means the compact ran; a larger one, that it was refused.
+ */
+async function settleCompact($: EngineInterface): Promise<void> {
+  const kept = (await $.store.get(COMPACT_KEY)) as { tokens?: unknown; percent?: unknown } | undefined
+  if (typeof kept?.tokens !== 'number') return
+  const { context } = await $.session.usage()
+  if (context.tokens === undefined || context.tokens === kept.tokens) return
+  await $.store.delete(COMPACT_KEY)
+  const percent = typeof kept.percent === 'number' ? kept.percent : undefined
+  if (context.tokens < kept.tokens) await applyFinishedCompact($, 'manual', percent)
+}
+
 export const register: Register = (on, options) => {
   cfg = configFrom(options as Record<string, unknown>)
 
@@ -446,6 +461,7 @@ export const register: Register = (on, options) => {
     )
     await quietly(refreshTools($))
     await quietly(refreshAgents($))
+    if (e.agentId === undefined) await quietly(settleCompact($))
     await quietly(
       loadDex($).then(async dex => {
         const events = await mutate($, dex, async loaded => {
@@ -496,15 +512,14 @@ export const register: Register = (on, options) => {
   })
 
   // Claude Code's sec-default plugin carries session.compact (and every classic.* event) past this tier
-  // on managed machines; a typed /compact still reaches command.run. A compact that ran leaves no context
-  // reading until the next response, and one that was refused leaves it standing.
+  // on managed machines; a typed /compact still reaches command.run, which returns before the compact lands.
+  // Its reading is kept in the store: the main loop's next turn.complete settles it (see settleCompact).
   on('command.run', { command: 'compact' }, async ($, e, next) => {
-    const before = await $.session.usage().then(u => u.context, () => undefined)
+    const context = await $.session.usage().then(u => u.context, () => undefined)
     compactHooked = false
     const out = await next(e)
-    const after = await $.session.usage().then(u => u.context, () => undefined)
-    if (!compactHooked && before?.tokens !== undefined && after !== undefined && after.tokens === undefined) {
-      await quietly(applyFinishedCompact($, 'manual', before.percent))
+    if (!compactHooked && context?.tokens !== undefined) {
+      await quietly($.store.set(COMPACT_KEY, { tokens: context.tokens, percent: context.percent }))
     }
     return out
   })

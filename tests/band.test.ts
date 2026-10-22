@@ -31,7 +31,7 @@ const COMMAND = {
 const BOUNDS = { '1': [28, 30, 35, 33], egg: [34, 34, 28, 30] }
 const MESSAGES = [{ role: 'user' as const, text: 'hello', toolUses: [] }]
 
-type Counters = { compacts: number; compacted?: boolean; compactGate?: Promise<void>; onCompactCommand?: () => void; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown>; agents?: Array<{ id: string; name?: string; description: string; type: string; status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed' }>; toolGate?: Promise<void>; toolResult?: (e: { tool: string }) => unknown }
+type Counters = { compacts: number; compacted?: boolean; percent?: number; compactGate?: Promise<void>; onCompactCommand?: () => void; spriteReads: string[]; toasts: string[]; saveReads: number; onSaveRead?: (n: number) => void; store: Map<string, unknown>; agents?: Array<{ id: string; name?: string; description: string; type: string; status: 'pending' | 'running' | 'waiting' | 'idle' | 'completed' | 'failed' | 'killed' }>; toolGate?: Promise<void>; toolResult?: (e: { tool: string }) => unknown }
 
 /** The engine beneath the plugin: fixed usage, the data files, a sprite, a compact that works. */
 function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: boolean } = {}): Counters {
@@ -53,8 +53,8 @@ function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: b
   on('session.usage', () => ({
     value: {
       startedAt: 0,
-      // A compacted conversation has no reading until its next response.
-      context: seen.compacted ? { window: 200_000 } : { tokens: percent * 2000, window: 200_000, percent },
+      // The reading stays at its pre-compact figures until a test sets the next response's percent.
+      context: { tokens: (seen.percent ?? percent) * 2000, window: 200_000, percent: seen.percent ?? percent },
       rateLimits: [],
     },
   }))
@@ -599,12 +599,23 @@ describe('hooks', () => {
     })
   }
 
-  test('a /compact whose session.compact never reached the hook applies the bank', async ($, on) => {
+  const TURN = { answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as const
+
+  test('a /compact whose session.compact never reached the hook applies the bank at the next, smaller reading', async ($, on) => {
     const seen = world(on, 70)
     compactCommand(on, seen)
     seen.store.set('save', mon(25, 0, { pending: 400 }))
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
     await $.command.run({ command: 'compact', args: '', ...COMMAND })
+    expect((seen.store.get('save') as Save).pending).toBe(400)
+    // The same reading again is not news; the next response's smaller one is.
+    await $.turn.complete(TURN)
+    expect(A(seen.store.get('save') as Save).xp).toBe(0)
+    seen.percent = 10
+    await $.turn.complete(TURN)
+    expect(seen.store.has('compactAwaited')).toBe(false)
+    seen.percent = 5
+    await $.turn.complete(TURN)
     const saved = seen.store.get('save') as Save
     expect(saved.pending).toBe(0)
     expect(A(saved).xp).toBe(400)
@@ -624,6 +635,8 @@ describe('hooks', () => {
     await $.session.compact({ trigger: 'manual', messages: MESSAGES })
     release()
     await ran
+    seen.percent = 10
+    await $.turn.complete(TURN)
     const saved = seen.store.get('save') as Save
     expect(A(saved).xp).toBe(400)
     expect(saved.lifetime.compacts).toBe(1)
@@ -636,6 +649,12 @@ describe('hooks', () => {
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
     await $.command.run({ command: 'compact', args: '', ...COMMAND })
     expect((seen.store.get('save') as Save).pending).toBe(400)
+    seen.percent = 75
+    await $.turn.complete(TURN)
+    const saved = seen.store.get('save') as Save
+    expect(A(saved).xp).toBe(0)
+    expect(saved.lifetime.compacts).toBe(0)
+    expect(seen.store.has('compactAwaited')).toBe(false)
   })
 
   test('a precompute applies nothing', async ($, on) => {
