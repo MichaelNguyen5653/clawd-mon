@@ -113,6 +113,7 @@ function world(on: On, percent = 62, options: { noSprites?: boolean; noLists?: b
     const { Box } = $.ui.resolve(e)
     return Box({})
   })
+  on('classic.PostCompact', () => ({}))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.measure', (_$, e) => ({ changed: e.changed }))
   on('ui.toast', (_$, e) => {
@@ -581,6 +582,47 @@ describe('hooks', () => {
     const saved = seen.store.get('save') as Save
     expect(saved.pending).toBe(0)
     expect(A(saved).xp).toBe(200)
+  })
+
+  // A managed plugin whose `next.to` jumps past the user tier, as cc-plugin-sec-default does.
+  const BYPASS = {
+    name: 'cc-plugin-sec-default',
+    tier: 'prepend',
+    register(on) {
+      on('session.compact', (_$, e, next) => next.to(e, 'append'))
+    },
+  } as const
+
+  test('a compact that bypasses the session.compact hook applies the bank on PostCompact', { plugins: [BYPASS] }, async ($, on) => {
+    const seen = world(on, 70)
+    seen.store.set('save', mon(25, 0, { pending: 400 }))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    await $.session.compact({ trigger: 'manual', messages: MESSAGES })
+    expect((seen.store.get('save') as Save).pending).toBe(400)
+    await $.classic.PostCompact({ trigger: 'manual', compact_summary: 'summary' })
+    const saved = seen.store.get('save') as Save
+    expect(saved.pending).toBe(0)
+    expect(A(saved).xp).toBe(400)
+    expect(saved.lifetime.compacts).toBe(1) // the percent before the compact (70%) still counts
+  })
+
+  test('PostCompact after a compact the hook already applied applies nothing more', async ($, on) => {
+    const seen = world(on, 70)
+    seen.store.set('save', mon(25, 0, { pending: 400 }))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    await $.session.compact({ trigger: 'manual', messages: MESSAGES })
+    await $.classic.PostCompact({ trigger: 'manual', compact_summary: 'summary' })
+    const saved = seen.store.get('save') as Save
+    expect(A(saved).xp).toBe(400)
+    expect(saved.lifetime.compacts).toBe(1)
+  })
+
+  test('a subagent PostCompact applies nothing', { plugins: [BYPASS] }, async ($, on) => {
+    const seen = world(on, 70)
+    seen.store.set('save', mon(25, 0, { pending: 400 }))
+    await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+    await $.classic.PostCompact({ trigger: 'auto', compact_summary: 'summary', agent_id: 'a1' })
+    expect((seen.store.get('save') as Save).pending).toBe(400)
   })
 
   test('a precompute applies nothing', async ($, on) => {
