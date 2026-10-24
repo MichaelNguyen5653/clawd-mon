@@ -575,7 +575,7 @@ describe('commands', () => {
     const text = run(ensureTarget(newSave(), DEX, () => 0), 'status').text
     expect(text).toMatch(/Egg Lv 1/)
     expect(text).toMatch(/Box: 1/)
-    expect(text).toMatch(/Next egg: 0\/25/)
+    expect(text).toMatch(/Next egg: 0\/15/)
     expect(text).not.toMatch(/crack|hatch at|next hatch/i)
     expect(text).not.toMatch(/Bulbasaur/)
     const withPace = { ...newSave(), daily: { [DAY]: 900 } }
@@ -588,7 +588,7 @@ describe('commands', () => {
     expect(text).toMatch(/Active: Pikachu Lv 2\d/)
     expect(text).toMatch(/Next: Raichu at Lv 30/)
     expect(text).toMatch(/10 days/)
-    expect(text).toMatch(/Next egg: 7\/25/)
+    expect(text).toMatch(/Next egg: 7\/15/)
   })
 
   test('box lists numbers, an active marker, names for Pokémon and Egg for eggs', async () => {
@@ -702,10 +702,10 @@ describe('box: earning eggs', () => {
     expect(r.save.box).toHaveLength(1)
   })
 
-  test('every 25th counted compact earns an egg and the counter restarts', async () => {
+  test('every 15th counted compact earns an egg and the counter restarts', async () => {
     let s = mon(25, 0, 0)
     let eggs = 0
-    for (let i = 1; i <= 24; i++) {
+    for (let i = 1; i <= 14; i++) {
       const r = applyCompact({ ...s, pending: 0 }, DEX, manual, cfg)
       s = r.save
       eggs += r.events.filter(e => e.kind === 'egg').length
@@ -720,16 +720,16 @@ describe('box: earning eggs', () => {
   })
 
   test('only counted (qualifying) compacts move the milestone', async () => {
-    const s = mon(25, 0, 0, { milestone: 24 })
+    const s = mon(25, 0, 0, { milestone: 14 })
     const low = applyCompact(s, DEX, { trigger: 'manual', percent: 39 }, cfg)
-    expect(low.save.milestone).toBe(24)
+    expect(low.save.milestone).toBe(14)
     expect(low.save.box).toHaveLength(1)
     const none = applyCompact(s, DEX, { trigger: 'precompute', percent: 90 }, cfg)
     expect(none.save).toEqual(s)
   })
 
   test('new eggs are never auto-activated, and only the active entry gains xp', async () => {
-    const s = withBox([hatched(25, 10), hatched(4, 10, { id: 'a2' })], 'a1', { pending: 1000, milestone: 24 })
+    const s = withBox([hatched(25, 10), hatched(4, 10, { id: 'a2' })], 'a1', { pending: 1000, milestone: 14 })
     const r = applyCompact(s, DEX, manual, cfg)
     expect(r.save.activeId).toBe('a1')
     expect(r.save.box[0]!.xp).toBeGreaterThan(s.box[0]!.xp)
@@ -806,7 +806,7 @@ describe('save migration and hygiene (v2)', () => {
     const clean = sanitizeSave(dirty, DEX)
     expect(clean.box.map(e => e.id)).toEqual(['a1', 'a2'])
     expect(clean.activeId).toBe('a1')
-    expect(clean.milestone).toBe(24)
+    expect(clean.milestone).toBe(14)
     const empty = sanitizeSave({ ...s, box: [] }, DEX)
     expect(empty.box).toHaveLength(1)
     expect(empty.box[0]!.phase).toBe('egg')
@@ -947,7 +947,7 @@ describe('legendaries', () => {
   })
 
   test('Mew: after Mewtwo, a milestone egg has a 1% chance to be Mew; never before, never twice', async () => {
-    const base = { milestone: 24, legendsEarned: [144, 145, 146, 150] }
+    const base = { milestone: 14, legendsEarned: [144, 145, 146, 150] }
     const lucky = applyCompact(mon(25, 0, 0, base), DEX, manual, CFG, () => 0.005)
     expect(eggs(lucky.save)[0]).toMatchObject({ target: 151, origin: 'legendary' })
     expect(lucky.save.legendsEarned).toContain(151)
@@ -955,7 +955,7 @@ describe('legendaries', () => {
     const unlucky = applyCompact(mon(25, 0, 0, base), DEX, manual, CFG, () => 0.5)
     expect(eggs(unlucky.save)).toHaveLength(0)
     expect(unlucky.save.box[1]!.origin).toBe('milestone')
-    const early = applyCompact(mon(25, 0, 0, { milestone: 24, legendsEarned: [144] }), DEX, manual, CFG, () => 0.001)
+    const early = applyCompact(mon(25, 0, 0, { milestone: 14, legendsEarned: [144] }), DEX, manual, CFG, () => 0.001)
     expect(early.save.legendsEarned).not.toContain(151)
     const twice = applyCompact(mon(25, 0, 0, { ...base, legendsEarned: [...base.legendsEarned, 151] }), DEX, manual, CFG, () => 0.001)
     expect(eggs(twice.save)).toHaveLength(0)

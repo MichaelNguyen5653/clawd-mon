@@ -226,12 +226,12 @@ describe('band', () => {
   test('the title row shows !hint, milestone progress, and the box size when it holds more than one', async ($, on) => {
     const seen = world(on)
     for (const surface of ['desktop', 'terminal'] as const) {
-      seen.store.set('save', { ...mon(1, 5000, { milestone: 24 }), box: [hatchedEntry('a1', 1, 5000), newEntry('a2', 'milestone', 4), newEntry('a3', 'milestone', 4)], activeId: 'a1' })
+      seen.store.set('save', { ...mon(1, 5000, { milestone: 14 }), box: [hatchedEntry('a1', 1, 5000), newEntry('a2', 'milestone', 4), newEntry('a3', 'milestone', 4)], activeId: 'a1' })
       await $.session.start({ cwd: '.', surface, isInteractive: true })
       const ui = await $.ui.mount({ plugin: PLUGIN, surface, ...BAND })
       await ui.press({ key: 'tab-levels' })
       expect(await ui.find({ key: 'hint' })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /New egg \(24\/25\) · Box 3/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /New egg \(14\/15\) · Box 3/ })).toBeDefined()
       await ui.unmount()
     }
   })
@@ -242,7 +242,7 @@ describe('band', () => {
     await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
     const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
     await ui.press({ key: 'tab-levels' })
-    expect(await ui.find({ type: 'Text', text: /^New egg \(0\/25\)$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^New egg \(0\/15\)$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Box \d/ })).toBeUndefined()
     await ui.unmount()
   })
@@ -747,7 +747,7 @@ describe('hooks', () => {
 
   test('a milestone compact toasts the new egg and adds it to the box', async ($, on) => {
     const seen = world(on, 70)
-    seen.store.set('save', mon(25, 0, { pending: 10, milestone: 24 }))
+    seen.store.set('save', mon(25, 0, { pending: 10, milestone: 14 }))
     await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
     await $.session.compact({ trigger: 'manual', messages: MESSAGES })
     const saved = seen.store.get('save') as Save
@@ -814,7 +814,7 @@ describe('actions tab', () => {
       await ui.press({ key: 'tab-levels' })
       expect(await ui.find({ type: 'Text', text: STATS })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /321/ })).toBeDefined()
-      expect(await ui.find({ type: 'Text', text: /^New egg \(0\/25\)$/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^New egg \(0\/15\)$/ })).toBeDefined()
       expect(await ui.find({ type: 'Text', text: /^Current action - / })).toBeUndefined()
       expect(await ui.find({ type: 'Text', text: /^62%$/ })).toBeUndefined()
       await ui.press({ key: 'tab-actions' })
