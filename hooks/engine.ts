@@ -5,7 +5,7 @@
 // entry of the box (manual or plugin: all of it, auto: half, the rest is forfeited). Decay
 // eats pending while the context is dangerously full. Level comes from the species' growth
 // table with a base-stat-total drag; evolution needs a level and a number of qualifying
-// compacts. Finishing a line, hitting Lv 40 with a single-stage species, or every 25
+// compacts. Finishing a line, hitting Lv 40 with a single-stage species, or every 15
 // qualifying compacts earns a new egg in the box.
 
 import type { ClawdMonEntry, ClawdMonLifetime, ClawdMonSave, ClawdMonStreaks } from '../types'
@@ -77,7 +77,7 @@ export const QUALIFY_PERCENT = 40
 /** Qualifying compacts since hatch for the first and second evolution. */
 export const EVOLVE_COMPACTS = [3, 8] as const
 /** Every this many qualifying compacts the box gets a new egg. */
-export const MILESTONE_COMPACTS = 25
+export const MILESTONE_COMPACTS = 15
 /** A single-stage species earns one egg at this level. */
 export const SINGLE_STAGE_EGG_LEVEL = 40
 export const AUTO_SHARE = 0.5

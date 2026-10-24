@@ -211,7 +211,7 @@ export function hintRules(cfg: Pick<Config, 'dangerPercent'>): string[] {
     '/compact to level up: it applies pending XP. Only compacts at 40%+ context count.',
     `Pending XP decays 2%/turn at ${cfg.dangerPercent}%+ context.`,
     'Only the active Pokémon or egg gains XP.',
-    'New egg: fully evolve the active one, or every 25 counted compacts.',
+    'New egg: fully evolve the active one, or every 15 counted compacts.',
   ]
 }
 

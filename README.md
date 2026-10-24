@@ -38,7 +38,7 @@ Needs a Claude Code build with function hooks (plugin `modules`). Desktop draws 
 | Evolution | Level ≥ species level AND qualifying compacts since hatch: 3 (first), 8 (second). Item: Lv 30. Trade: Lv 36 |
 | Branches | Eevee etc.: first by default, `/clawd-mon branch <name>` picks |
 | Box | Many Pokémon and eggs. Only the active one gains XP; pending goes to whoever is active at compact time. `switch` is free |
-| Bonus eggs | +1 egg when the active one evolves into a final form (origin `evolved`); +1 once when a single-stage species hits Lv 40 (`mastery`); +1 every 25 counted compacts. New eggs wait in the box, never auto-active. Band shows `New egg (n/25)` and `Box N` |
+| Bonus eggs | +1 egg when the active one evolves into a final form (origin `evolved`); +1 once when a single-stage species hits Lv 40 (`mastery`); +1 every 15 counted compacts. New eggs wait in the box, never auto-active. Band shows `New egg (n/15)` and `Box N` |
 | Pace | Bulbasaur → Venusaur ≈ 30 days at ~1.5M tokens/day, one compact a day alternating manual/auto (23 days all manual) |
 
 Evolution is checked at compact time only. An egg whose XP has reached its hatch level shows `Ready to evolve`: only a counted compact moves it on.
@@ -50,7 +50,7 @@ Two tabs at the start of the title row (selected bright, other dim). Actions is 
 | Tab | Shows |
 |---|---|
 | Actions | Title row with context `62%` (no milestone). Then a summary of now, never a log: `Current action - …`, one `Agent N - [name - ]…` row per live agent. Max 3 rows; extra agents fold into `(+N more)`. Rows clipped to 72 chars. Never taller than Levels |
-| Levels | The band as before: XP and pending, context bar, agents/tools stats, `New egg (n/25)` |
+| Levels | The band as before: XP and pending, context bar, agents/tools stats, `New egg (n/15)` |
 
 Current action: in-progress task (`TodoWrite` / `TaskUpdate`) → `Waiting on Agent N` (foreground agent) → tool label → `Thinking` (turn running) → `Idle`.
 
@@ -74,7 +74,7 @@ Agent rows with no tool in flight: `Waiting` (idle teammate), `Starting`, else t
 - `show` / `hide`: band on/off. × on the band = hide.
 - `hint`: open the in-band help (same as the `!hint` button; Cancel closes it).
 - `dex`: the catalog in the band (same Cancel as `!hint`; opening one closes the other). Header `Dex n/151 · ★ n/4`, then a counts line `Starters n/9 · Common n/59 · Uncommon n/55 · Rare n/23` (all non-legendary species by tier), then one row per legendary: silhouette and `???` until earned, lore line, goal, progress or `locked`.
-- `status`: active entry, evolution gates, days to next evolution (Pokémon only, recent daily pace), box size, egg progress N/25, lifetime totals.
+- `status`: active entry, evolution gates, days to next evolution (Pokémon only, recent daily pace), box size, egg progress N/15, lifetime totals.
 - `box`: list entries: number, active marker, name or Egg, level.
 - `switch <name|#>`: make an entry active. Free, no confirm.
 - `release <name|#> confirm`: remove an entry. Active one released: first remaining becomes active. Box empty: a fresh random egg is added and made active.

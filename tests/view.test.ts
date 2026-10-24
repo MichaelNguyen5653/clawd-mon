@@ -132,7 +132,7 @@ describe('in-band help', () => {
   test('rules show the configured decay line and no level spoilers', async () => {
     expect(all(hintRules({ dangerPercent: 70 }))).toMatch(/decays 2%\/turn at 70%\+/)
     expect(all(hintRules({ dangerPercent: 80 }))).toMatch(/40%\+ context/)
-    expect(all(hintRules({ dangerPercent: 80 }))).toMatch(/every 25 counted compacts/)
+    expect(all(hintRules({ dangerPercent: 80 }))).toMatch(/every 15 counted compacts/)
     expect(all(hintRules({ dangerPercent: 80 }))).not.toMatch(/Lv \d|level \d/i)
     expect(all([...HINT_COMMANDS])).not.toMatch(/Lv \d/)
   })
