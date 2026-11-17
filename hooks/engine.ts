@@ -63,6 +63,7 @@ export type GameEvent =
   | { kind: 'evolve'; from: number; to: number }
   | { kind: 'egg'; origin: 'evolved' | 'milestone' | 'mastery' }
   | { kind: 'legend'; id: number }
+  | { kind: 'aura'; tier: number }
 
 export type CompactTrigger = 'manual' | 'auto' | 'plugin' | 'precompute'
 
@@ -84,6 +85,14 @@ export const AUTO_SHARE = 0.5
 export const DECAY_PER_TURN = 0.02
 export const ITEM_EVOLVE_LEVEL = 30
 export const TRADE_EVOLVE_LEVEL = 36
+/** Share of a stage (its start level to the next evolution level) at which the glow, then particles, appear. */
+export const AURA_STAGE_SHARES = [0.25, 0.6] as const
+/** Aura tier once the level reaches the next evolution (it waits on counted compacts). */
+export const AURA_CHARGED = 3
+/** Levels at which a Pokémon with no evolution left reaches aura tiers 1-3. */
+export const AURA_FINAL_LEVELS = [10, 20, 40] as const
+/** Every Pokémon wears the crown (tier 4) from this level; the little extras stop growing here too. */
+export const AURA_CROWN_LEVEL = 70
 /** Legendary goals. */
 export const COOL_DAYS_GOAL = 14
 export const STRIKE_GOAL = 30
@@ -445,13 +454,58 @@ function entryNext(entry: Entry, dex: Dex): NextEvolution | null {
   const evo = chosen ?? s.evolutions[0]!
   const to = find(dex, evo.to)
   if (!to) return null
-  const level =
-    evo.trigger === 'level-up'
-      ? (evo.level ?? ITEM_EVOLVE_LEVEL)
-      : evo.trigger === 'trade'
-        ? TRADE_EVOLVE_LEVEL
-        : ITEM_EVOLVE_LEVEL
-  return { to, level, compactsNeeded: s.stage <= 0 ? EVOLVE_COMPACTS[0] : EVOLVE_COMPACTS[1] }
+  return { to, level: evolveLevel(evo), compactsNeeded: s.stage <= 0 ? EVOLVE_COMPACTS[0] : EVOLVE_COMPACTS[1] }
+}
+
+/** Level an evolution needs: its own level, or the item / trade stand-in. */
+function evolveLevel(evo: Evolution): number {
+  return evo.trigger === 'level-up'
+    ? (evo.level ?? ITEM_EVOLVE_LEVEL)
+    : evo.trigger === 'trade'
+      ? TRADE_EVOLVE_LEVEL
+      : ITEM_EVOLVE_LEVEL
+}
+
+/** Level the species' current stage starts at: the level its previous form evolves at, else its hatch level. */
+function stageStart(sp: Species, dex: Dex): number {
+  const prev = sp.evolvesFrom !== null ? find(dex, sp.evolvesFrom) : undefined
+  const evo = prev?.evolutions.find(e => e.to === sp.id)
+  return evo ? evolveLevel(evo) : hatchLevel(sp)
+}
+
+/** Aura tier at `level`: by share of the stage while it can evolve, by level milestones once it cannot. */
+function auraAt(level: number, start: number, next: NextEvolution | null): number {
+  if (level >= AURA_CROWN_LEVEL) return 4
+  if (next === null) return AURA_FINAL_LEVELS.filter(l => level >= l).length
+  if (level >= next.level) return AURA_CHARGED
+  const span = next.level - start
+  const share = span > 0 ? (level - start) / span : 1
+  return AURA_STAGE_SHARES.filter(s => share >= s).length
+}
+
+/** Aura tier 0-4 of an entry; eggs have none. */
+export function auraTier(entry: Entry, dex: Dex): number {
+  const sp = speciesOf(entry, dex)
+  if (!sp) return 0
+  return auraAt(levelOf(entry.xp, sp.growthRate, dex.growth), stageStart(sp, dex), entryNext(entry, dex))
+}
+
+/** Little extras by level, up to the crown: a shooting star every 10 levels, a twinkle at each 5 between. */
+export function auraExtras(level: number): { shooting: number; twinkle: number } {
+  const l = Math.min(level, AURA_CROWN_LEVEL)
+  return { shooting: Math.floor(l / 10), twinkle: Math.floor((l + 5) / 10) }
+}
+
+/** Lowest level that raises the entry's aura tier; null for an egg or at the top tier of its stage. */
+export function auraNextLevel(entry: Entry, dex: Dex): number | null {
+  const sp = speciesOf(entry, dex)
+  if (!sp) return null
+  const level = levelOf(entry.xp, sp.growthRate, dex.growth)
+  const start = stageStart(sp, dex)
+  const next = entryNext(entry, dex)
+  const now = auraAt(level, start, next)
+  for (let l = level + 1; l <= MAX_LEVEL; l++) if (auraAt(l, start, next) > now) return l
+  return null
 }
 
 /** The evolution the active Pokémon is working toward, or null at the end of its line. */
@@ -632,6 +686,7 @@ export function applyCompact(
   } else {
     const sp = speciesOf(entry, dex)
     if (sp) {
+      const auraBefore = auraTier(entry, dex)
       const before = levelOf(entry.xp, sp.growthRate, dex.growth)
       entry.xp += raw * dragFactor(sp)
       const after = levelOf(entry.xp, sp.growthRate, dex.growth)
@@ -652,6 +707,9 @@ export function applyCompact(
         earnSingle = true
         fullLines += 1
       }
+      // An evolution has its own toast; its new stage starts a new aura.
+      const auraAfter = auraTier(entry, dex)
+      if (evolved === 0 && auraAfter > auraBefore) events.push({ kind: 'aura', tier: auraAfter })
     }
   }
 
@@ -740,6 +798,12 @@ export type Progress =
       legendary: boolean
       /** The tier banner shown once hatched. */
       rarity: Rarity
+      /** Aura tier 0-4, drawn around the sprite and as ✦ marks by the name. */
+      aura: number
+      /** The species' types: the first themes the aura, the second tints its charged particles. */
+      types: string[]
+      /** Shooting stars and twinkles earned by level (see auraExtras). */
+      extras: { shooting: number; twinkle: number }
     }
 
 function entryProgress(entry: Entry, pending: number, dex: Dex): Progress {
@@ -781,6 +845,9 @@ function entryProgress(entry: Entry, pending: number, dex: Dex): Progress {
     next: next ? { name: next.to.name, level: next.level, compactsNeeded: next.compactsNeeded } : null,
     legendary: sp.legendary,
     rarity: rarity(dex, sp),
+    aura: auraTier(entry, dex),
+    types: sp.types,
+    extras: auraExtras(level),
   }
 }
 
@@ -994,6 +1061,8 @@ function statusText(save: Save, dex: Dex, day: string): string {
     } else {
       lines.push('Fully evolved.')
     }
+    const auraNext = auraNextLevel(entry, dex)
+    lines.push(`Aura: ${p.aura > 0 ? '✦'.repeat(p.aura) : 'none'}${auraNext !== null ? `; grows at Lv ${auraNext}` : ''}.`)
   }
   lines.push(`Pending ${Math.floor(p.pending)} XP; compact to apply it.`)
   lines.push(`Box: ${save.box.length}. Next egg: ${save.milestone}/${MILESTONE_COMPACTS} counted compacts.`)

@@ -43,6 +43,33 @@ Needs a Claude Code build with function hooks (plugin `modules`). Desktop draws 
 
 Evolution is checked at compact time only. An egg whose XP has reached its hatch level shows `Ready to evolve`: only a counted compact moves it on.
 
+## Aura
+
+Hatched Pokémon glow and sparkle as they level. Drawn inside the sprite's box (no shrink). `✦` marks after the name; `status` shows the tier and the next level. Toast when a compact raises the tier. Reduced motion: still image. Eggs: cracks only.
+
+| Tier | Can still evolve | Final / single-stage | Look |
+|---|---|---|---|
+| ✦ | 25% of the stage | Lv 10 | glow in the first type's colour |
+| ✦✦ | 60% of the stage | Lv 20 | + 3 type particles |
+| ✦✦✦ | at its evolution level (waiting on compacts) | Lv 40 | brighter, 6 particles (half in the second type) |
+| ✦✦✦✦ | Lv 70 | Lv 70 | crown: gold ring and sparkles |
+
+Stage = hatch level (or the level it evolved at) → next evolution level. Evolving resets the aura for the new stage.
+
+Type particles: fire embers rise · water / poison bubbles rise · grass leaves drift · electric sparks flicker · ice flakes fall · fighting rings pulse · ground dust at the feet · flying streaks · psychic rings, bug fireflies, rock pebbles, dragon scales orbit · ghost wisps fade · normal / fairy / steel twinkle.
+
+Every Pokémon, from hatch:
+
+| Extra | Rule |
+|---|---|
+| Twinkle | +1 at Lv 5, 15, 25 … 65 |
+| Shooting star | +1 at Lv 10, 20 … 70; more stars fire more often |
+| Common | 2 silver twinkles |
+| Starter | orange spark circling it |
+| Uncommon | green ring pulsing at its feet |
+| Rare | white shine sweeping across the sprite + blue sparkle |
+| Legendary | dashed rainbow ring turning + 3 white glints |
+
 ## Band tabs
 
 Two tabs at the start of the title row (selected bright, other dim). Actions is the default each session.
