@@ -8,6 +8,7 @@ import {
   adviceLine,
   AURA_THEMES,
   auraOverlay,
+  PRISM,
   dexRowLine,
   dexRows,
   HINT_COMMANDS_ONE_ROW,
@@ -252,14 +253,15 @@ describe('aura', () => {
     expect(svg.lastIndexOf('class="au-p')).toBeGreaterThan(svg.indexOf('<image'))
   })
 
-  test('a legendary gets a rainbow ring and glints at every tier, 0 included; others never do', async () => {
+  test('a legendary gets five rainbow glints that twinkle, nothing that turns, at every tier; others never do', async () => {
     const zero = auraOverlay(box, 0, ['ice'], true, { rarity: 'legendary' })
     expect(zero.under).toBe('')
-    expect(zero.over).toMatch(/au-prism/)
-    expect((zero.over.match(/class="au-p/g) ?? []).length).toBe(4)
-    expect(auraOverlay(box, 3, ['ice'], true, { rarity: 'legendary' }).over).toMatch(/au-prism/)
-    expect(auraOverlay(box, 4, ['ice'], true, { rarity: 'rare' }).over).not.toMatch(/au-prism/)
-    expect(spriteSvg({ base64: 'AAAA', bounds: box, size: 80, animate: false, owner: { rarity: 'legendary' } })).toMatch(/au-prism/)
+    expect((zero.over.match(/class="au-p au-twinkle"/g) ?? []).length).toBe(5)
+    expect(zero.over).not.toMatch(/au-orbit/)
+    for (const c of PRISM) expect(zero.over).toContain(c)
+    expect(auraOverlay(box, 3, ['ice'], true, { rarity: 'legendary' }).over).toContain(PRISM[0])
+    expect(auraOverlay(box, 4, ['ice'], true, { rarity: 'rare' }).over).not.toContain(PRISM[0])
+    expect(spriteSvg({ base64: 'AAAA', bounds: box, size: 80, animate: false, owner: { rarity: 'legendary' } })).toContain(PRISM[4])
   })
 
   test('every rarity has its own signature, from tier 0', async () => {

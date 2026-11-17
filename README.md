@@ -68,7 +68,7 @@ Every Pokémon, from hatch:
 | Starter | orange spark circling it |
 | Uncommon | green ring pulsing at its feet |
 | Rare | white shine sweeping across the sprite + blue sparkle |
-| Legendary | dashed rainbow ring turning + 3 white glints |
+| Legendary | 5 rainbow glints twinkling round it |
 
 ## Band tabs
 

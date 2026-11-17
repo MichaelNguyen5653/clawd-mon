@@ -485,7 +485,7 @@ function extrasLayer(extras: { shooting: number; twinkle: number }, [bx, by, bw,
 /**
  * Every rarity has a signature, so every Pokémon gets some love from the start:
  * common two silver twinkles · starter an orange spark circling it · uncommon a green ring pulsing at its feet ·
- * rare a blue sparkle (plus the shine across the sprite, see spriteSvg) · legendary a turning rainbow ring.
+ * rare a blue sparkle (plus the shine across the sprite, see spriteSvg) · legendary five rainbow glints.
  */
 function rarityLayer(rarity: Rarity, [bx, by, bw, bh]: Box, feet: number, s: number, animate: boolean): string {
   const cx = bx + bw / 2
@@ -526,28 +526,19 @@ function shineSweep(base64: string, [vx, vy, vw, vh]: [number, number, number, n
   )
 }
 
-/** A legendary's mark: a dashed rainbow ring turning slowly round it, and three white glints. */
+/** Rainbow colours of a legendary's glints. */
+export const PRISM = ['#FF5A5A', '#FFC93C', '#5BE37D', '#4FC3F7', '#B388FF'] as const
+
+/** A legendary's mark: five glints in rainbow colours twinkling round it, nothing that turns. */
 function legendLayer(cx: number, cy: number, w: number, s: number, animate: boolean): string {
-  const r = w * 0.66
-  const ring =
-    '<defs><linearGradient id="au-prism" x1="0" y1="0" x2="1" y2="1">' +
-    ['#FF5A5A', '#FFC93C', '#5BE37D', '#4FC3F7', '#B388FF']
-      .map((c, i) => `<stop offset="${i / 4}" stop-color="${c}"/>`)
-      .join('') +
-    '</linearGradient></defs>' +
-    `<g class="au-p${animate ? ' au-orbit' : ''}"${animate ? ` style="transform-origin:${r1(cx)}px ${r1(cy)}px;animation-duration:12s"` : ''}>` +
-    `<circle cx="${r1(cx)}" cy="${r1(cy)}" r="${r1(r)}" fill="none" stroke="url(#au-prism)" ` +
-    `stroke-width="${r1(Math.max(0.8, s * 0.35))}" stroke-dasharray="${r1(s * 1.6)} ${r1(s * 0.8)}" stroke-linecap="round" opacity=".9"/></g>`
-  const glints = [0, 1, 2]
-    .map(i => {
-      const a = -Math.PI / 2 + (i * 2 * Math.PI) / 3
-      const x = cx + Math.cos(a) * r
-      const y = cy + Math.sin(a) * r
-      const delay = animate ? ` style="animation-delay:-${r1(i * 0.6)}s"` : ''
-      return `<g class="au-p${animate ? ' au-twinkle' : ''}"${delay}>${particleShape('star', x, y, s * 1.1, '#FFFFFF')}</g>`
-    })
-    .join('')
-  return ring + glints
+  const r = w * 0.62
+  return PRISM.map((c, i) => {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / PRISM.length
+    const x = cx + Math.cos(a) * r
+    const y = cy + Math.sin(a) * r
+    const delay = animate ? ` style="animation-delay:-${r1(i * 0.36)}s"` : ''
+    return `<g class="au-p${animate ? ' au-twinkle' : ''}"${delay}>${particleShape('star', x, y, s * 0.9, c)}</g>`
+  }).join('')
 }
 
 /** Particle `i` of `n`: placed for its motion, its loop offset so they never move in step. */
