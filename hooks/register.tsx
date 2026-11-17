@@ -695,7 +695,16 @@ export const register: Register = (on, options) => {
       <Box flexDirection="row" alignItems="center" gap={2} width="100%">
         {sprite && 'Svg' in table ? (
           <table.Svg
-            source={spriteSvg({ base64: sprite, bounds, size: SPRITE_PX, animate: !reducedMotion, crack: p.kind === 'egg' ? p.stage : 0 })}
+            source={spriteSvg({
+              base64: sprite,
+              bounds,
+              size: SPRITE_PX,
+              animate: !reducedMotion,
+              crack: p.kind === 'egg' ? p.stage : 0,
+              aura: p.kind === 'mon' ? p.aura : 0,
+              types: p.kind === 'mon' ? p.types : [],
+              owner: p.kind === 'mon' ? { rarity: p.rarity, extras: p.extras } : undefined,
+            })}
             alt={title}
             width={SPRITE_PX}
             height={SPRITE_PX}

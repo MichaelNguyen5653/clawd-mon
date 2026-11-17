@@ -112,11 +112,20 @@ function view(save, u) {
 }
 
 /** One desktop band, laid out like register.tsx draws it. */
-function desktopBand({ save, usage: u, label, hint = false, tab = 'levels', activity = null, agents = [] }) {
+function desktopBand({ save, usage: u, label, hint = false, tab = 'levels', activity = null, agents = [], animate = false }) {
   const { p, rec, key } = view(save, u)
   const b64 = png(key)
   const svg = b64
-    ? spriteSvg({ base64: b64, bounds: bounds[key], size: 80, animate: false, crack: p.kind === 'egg' ? p.stage : 0 })
+    ? spriteSvg({
+        base64: b64,
+        bounds: bounds[key],
+        size: 80,
+        animate,
+        crack: p.kind === 'egg' ? p.stage : 0,
+        aura: p.kind === 'mon' ? p.aura : 0,
+        types: p.kind === 'mon' ? p.types : [],
+        owner: p.kind === 'mon' ? { rarity: p.rarity, extras: p.extras } : undefined,
+      })
     : ''
   const color = contextColor(u?.percent, cfg)
   const advice = adviceLine(rec, u, cfg)
@@ -394,6 +403,30 @@ textCards.push({
   caption: 'Toast when a legendary egg is earned.',
   text: eventToast({ kind: 'legend', id: 145 }, dex),
 })
+// ---------- aura ----------
+
+// One species per type (Magneton for steel), drawn at every tier, animated.
+const AURA_IDS = [19, 4, 7, 1, 25, 144, 66, 23, 27, 74, 16, 63, 10, 92, 147, 35, 82]
+const auraTile = (id, tier) => {
+  const b64 = png(String(id))
+  const svg = b64 ? spriteSvg({ base64: b64, bounds: bounds[String(id)], size: 80, animate: true, aura: tier, types: species(id).types }) : ''
+  return `<div class="tile"><div class="spr">${svg}</div><div class="sub">${tier ? '✦'.repeat(tier) : '—'}</div></div>`
+}
+const auraRows = () =>
+  AURA_IDS.map(
+    id => `<div class="aurarow"><span class="sub">${esc(`${species(id).name} · ${species(id).types.join('/')}`)}</span>${[0, 1, 2, 3, 4].map(t => auraTile(id, t)).join('')}</div>`,
+  ).join('')
+// Tiers the engine picks from level: mid-stage forms by share of the stage, final forms by milestone.
+const auraBands = [
+  { save: mon(144, 11), usage: usage(30), label: 'Articuno Lv 11: single-stage, Lv 10 → ✦', animate: true },
+  { save: mon(82, 33), usage: usage(30), label: 'Magneton Lv 33: final form, Lv 20 → ✦✦', animate: true },
+  { save: mon(4, 14), usage: usage(30), label: 'Charmander Lv 14: 60% of 5→16 → ✦✦', animate: true },
+  { save: mon(2, 32, { compacts: 5 }), usage: usage(30), label: 'Ivysaur Lv 32: at its evolution level, waiting on compacts → ✦✦✦', animate: true },
+  { save: mon(3, 70), usage: usage(30), label: 'Venusaur Lv 70: crown → ✦✦✦✦', animate: true },
+]
+const auraSection = `<section><h2><span>✦</span> Aura by level (engine-picked tier), animated.</h2><div class="pair"><div class="panel light">${auraBands.map(desktopBand).join('')}</div><div class="panel dark">${auraBands.map(desktopBand).join('')}</div></div></section>
+<section><h2><span>✦</span> Aura tiers 0-4 per type: glow · 3 particles · 6 (half in the second type) · gold crown.</h2><div class="pair"><div class="panel light">${auraRows()}</div><div class="panel dark">${auraRows()}</div></div></section>`
+
 const extra = dexSections + '\n' +
   textCards
     .map(c => `<section><h2><span>${c.n}</span> ${esc(c.caption)}</h2><div class="pair"><pre class="panel light">${esc(c.text)}</pre><pre class="panel dark">${esc(c.text)}</pre></div></section>`)
@@ -419,8 +452,10 @@ const html = `<!doctype html>
   .btns { display: flex; gap: 6px; } button { font: inherit; padding: 4px 10px; border-radius: 4px; border: 1px solid #8886; background: transparent; color: inherit; }
   button.primary { background: #D97757; border-color: #D97757; color: #fff; } button.x { border: 0; opacity: .6; }
   pre.panel { font: 12px/1.35 ui-monospace, Consolas, monospace; margin: 0; white-space: pre; display: block; }
+  .aurarow { display: flex; align-items: center; gap: 8px; } .aurarow > .sub { width: 150px; flex: none; } .tile { display: flex; flex-direction: column; align-items: center; }
 </style>
 <h1>Clawd-mon review (light and dark panels)</h1>
+${auraSection}
 ${cards}
 ${terminal}
 ${extra}

@@ -29,6 +29,9 @@ import {
   rarity,
   newEntry,
   observeTurn,
+  auraTier,
+  auraNextLevel,
+  auraExtras,
   type Entry,
   type GameEvent,
   type Save,
@@ -1273,5 +1276,83 @@ describe('pace', () => {
     expect(day).toBeLessThanOrEqual(45)
     expect(hatchedOn).toBeGreaterThanOrEqual(3) // each egg stage needs its own compact
     expect(hatchedOn).toBeLessThanOrEqual(5)
+  })
+})
+
+describe('aura', () => {
+  const at = (id: number, level: number, over: Partial<Entry> = {}) => hatched(id, level, over)
+  const tier = (id: number, level: number) => auraTier(at(id, level), DEX)
+
+  test('a form that can evolve: 25% of its stage glows, 60% adds particles, its evolution level charges it', async () => {
+    // Bulbasaur hatches at Lv 5 and evolves at 16.
+    expect([7, 8, 11, 12, 15, 16, 20].map(l => tier(1, l))).toEqual([0, 1, 1, 2, 2, 3, 3])
+    // Ivysaur's stage runs from Bulbasaur's evolution level (16) to 32.
+    expect([19, 20, 25, 26, 32].map(l => tier(2, l))).toEqual([0, 1, 1, 2, 3])
+    // A trade evolution counts to its stand-in level (36), from Abra's 16.
+    expect([20, 21, 28, 36].map(l => tier(64, l))).toEqual([0, 1, 2, 3])
+  })
+
+  test('a final or single-stage Pokémon grows at Lv 10, 20, 40 and 70', async () => {
+    expect([9, 10, 19, 20, 39, 40, 69, 70, 100].map(l => tier(122, l))).toEqual([0, 1, 1, 2, 2, 3, 3, 4, 4])
+    expect(tier(3, 32)).toBe(2)
+  })
+
+  test('eggs have no aura', async () => {
+    expect(auraTier(eggEntry({ xp: 99_999 }), DEX)).toBe(0)
+    expect(auraNextLevel(eggEntry(), DEX)).toBeNull()
+  })
+
+  test('every Pokémon wears the crown from Lv 70, evolved or not; extras grow every 5 levels up to it', async () => {
+    expect(tier(1, 70)).toBe(4)
+    expect(tier(2, 69)).toBe(3)
+    expect([0, 4, 5, 9, 10, 15, 20, 65, 70, 100].map(auraExtras)).toEqual([
+      { shooting: 0, twinkle: 0 },
+      { shooting: 0, twinkle: 0 },
+      { shooting: 0, twinkle: 1 },
+      { shooting: 0, twinkle: 1 },
+      { shooting: 1, twinkle: 1 },
+      { shooting: 1, twinkle: 2 },
+      { shooting: 2, twinkle: 2 },
+      { shooting: 6, twinkle: 7 },
+      { shooting: 7, twinkle: 7 },
+      { shooting: 7, twinkle: 7 },
+    ])
+    const p = progress(mon(1, DEX.growth['medium-slow'][25]!), DEX)
+    expect(p.kind === 'mon' && p.extras).toEqual({ shooting: 2, twinkle: 3 })
+  })
+
+  test('the next level that grows it: the crown once charged, none at the top', async () => {
+    expect(auraNextLevel(at(1, 9), DEX)).toBe(12)
+    expect(auraNextLevel(at(1, 12), DEX)).toBe(16)
+    expect(auraNextLevel(at(1, 16), DEX)).toBe(70)
+    expect(auraNextLevel(at(122, 45), DEX)).toBe(70)
+    expect(auraNextLevel(at(122, 70), DEX)).toBeNull()
+  })
+
+  test('a compact that raises the tier says so once; one that does not stays quiet', async () => {
+    const g = DEX.growth['medium-slow']
+    const up = applyCompact(mon(1, g[11]!, 0, { pending: g[12]! - g[11]! + 20 }), DEX, { trigger: 'manual', percent: 50 }, CFG)
+    expect(up.events.filter(e => e.kind === 'aura')).toEqual([{ kind: 'aura', tier: 2 }])
+    const flat = applyCompact(mon(1, g[12]!, 0, { pending: 5 }), DEX, { trigger: 'manual', percent: 50 }, CFG)
+    expect(flat.events.some(e => e.kind === 'aura')).toBe(false)
+  })
+
+  test('an evolution resets the aura for the new stage without an aura toast', async () => {
+    const g = DEX.growth['medium-slow']
+    const r = applyCompact(mon(1, g[15]!, 2, { pending: g[16]! - g[15]! + 20 }), DEX, { trigger: 'manual', percent: 50 }, CFG)
+    expect(A(r.save).speciesId).toBe(2)
+    expect(r.events.some(e => e.kind === 'aura')).toBe(false)
+    expect(auraTier(A(r.save), DEX)).toBe(0)
+  })
+
+  test('progress carries the tier and types; status names the tier and the next level', async () => {
+    const s = mon(1, DEX.growth['medium-slow'][12]!)
+    const p = progress(s, DEX)
+    expect(p.kind === 'mon' && p.aura).toBe(2)
+    expect(p.kind === 'mon' && p.types).toEqual(['normal'])
+    expect(execute(s, DEX, 'status', { day: DAY, rng: () => 0 }).text).toMatch(/Aura: ✦✦; grows at Lv 16\./)
+    expect(execute(mon(1, DEX.growth['medium-slow'][6]!), DEX, 'status', { day: DAY, rng: () => 0 }).text).toMatch(
+      /Aura: none; grows at Lv 8\./,
+    )
   })
 })

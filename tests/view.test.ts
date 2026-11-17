@@ -6,6 +6,9 @@ import {
   actionsRows,
   activityLabel,
   adviceLine,
+  AURA_THEMES,
+  auraOverlay,
+  PRISM,
   dexRowLine,
   dexRows,
   HINT_COMMANDS_ONE_ROW,
@@ -200,6 +203,102 @@ describe('sprite svg', () => {
   })
 })
 
+describe('aura', () => {
+  const box = [34, 34, 28, 30] as const
+  const parts = (tier: number, types: string[] = ['fire'], animate = true) =>
+    (auraOverlay(box, tier, types, animate).over.match(/class="au-p/g) ?? []).length
+
+  test('tier 0 draws nothing and leaves the sprite exactly as before', async () => {
+    expect(auraOverlay(box, 0, ['fire'], true)).toEqual({ under: '', over: '', css: '' })
+    const plain = spriteSvg({ base64: 'AAAA', bounds: box, size: 80, animate: true })
+    expect(spriteSvg({ base64: 'AAAA', bounds: box, size: 80, animate: true, aura: 0, types: ['fire'] })).toBe(plain)
+  })
+
+  test('glow, then 3 particles, then 6, then a gold crown of 4 sparkles', async () => {
+    expect(auraOverlay(box, 1, ['fire'], true).under).toMatch(/au-halo/)
+    expect(parts(1)).toBe(0)
+    expect(parts(2)).toBe(3)
+    expect(parts(3)).toBe(6)
+    expect(parts(4)).toBe(10)
+    expect(auraOverlay(box, 4, ['fire'], true).over).toMatch(/#F5C542/)
+    expect(auraOverlay(box, 3, ['fire'], true).over).not.toMatch(/#F5C542/)
+  })
+
+  test('the first type themes it; charged particles take the second type on every other one', async () => {
+    const fire = AURA_THEMES.fire!.color
+    const flying = AURA_THEMES.flying!.color
+    expect(auraOverlay(box, 1, ['fire', 'flying'], true).under).toContain(fire)
+    expect(auraOverlay(box, 3, ['fire', 'flying'], true).over).toContain(flying)
+    expect(auraOverlay(box, 3, ['fire'], true).over).not.toContain(flying)
+  })
+
+  test('every type in the dex has a theme; an unknown one falls back to normal', async () => {
+    const all = 'bug dragon electric fairy fighting fire flying ghost grass ground ice normal poison psychic rock steel water'
+    for (const t of all.split(' ')) expect(AURA_THEMES[t]).toBeDefined()
+    expect(auraOverlay(box, 1, ['???'], true).under).toContain(AURA_THEMES.normal!.color)
+  })
+
+  test('still when motion is off: same particles, no animation', async () => {
+    const still = auraOverlay(box, 3, ['grass'], false)
+    expect(still.css).toBe('')
+    expect(still.over).not.toMatch(/animation|au-drift/)
+    expect(parts(3, ['grass'], false)).toBe(6)
+    expect(auraOverlay(box, 3, ['grass'], true).css).toMatch(/prefers-reduced-motion/)
+  })
+
+  test('an aura keeps the sprite full size (same viewBox), glow under and particles over the sprite', async () => {
+    const svg = spriteSvg({ base64: 'AAAA', bounds: box, size: 80, animate: true, aura: 2, types: ['water'] })
+    expect(svg).toMatch(/viewBox="31 32 34 34"/)
+    expect(svg.indexOf('au-halo')).toBeLessThan(svg.indexOf('<image'))
+    expect(svg.lastIndexOf('class="au-p')).toBeGreaterThan(svg.indexOf('<image'))
+  })
+
+  test('a legendary gets five rainbow glints that twinkle, nothing that turns, at every tier; others never do', async () => {
+    const zero = auraOverlay(box, 0, ['ice'], true, { rarity: 'legendary' })
+    expect(zero.under).toBe('')
+    expect((zero.over.match(/class="au-p au-twinkle"/g) ?? []).length).toBe(5)
+    expect(zero.over).not.toMatch(/au-orbit/)
+    for (const c of PRISM) expect(zero.over).toContain(c)
+    expect(auraOverlay(box, 3, ['ice'], true, { rarity: 'legendary' }).over).toContain(PRISM[0])
+    expect(auraOverlay(box, 4, ['ice'], true, { rarity: 'rare' }).over).not.toContain(PRISM[0])
+    expect(spriteSvg({ base64: 'AAAA', bounds: box, size: 80, animate: false, owner: { rarity: 'legendary' } })).toContain(PRISM[4])
+  })
+
+  test('every rarity has its own signature, from tier 0', async () => {
+    const sig = (rarity: 'common' | 'starter' | 'uncommon' | 'rare') => auraOverlay(box, 0, ['fire'], true, { rarity }).over
+    expect(sig('common')).toContain('#D9DEE5')
+    expect(sig('starter')).toMatch(/#FF8A3D[\s\S]*|au-orbit/)
+    expect(sig('starter')).toMatch(/au-orbit/)
+    expect(sig('uncommon')).toMatch(/au-pulse[\s\S]*#5BD16A/)
+    expect(sig('rare')).toContain('#8EC5FF')
+    expect(new Set((['common', 'starter', 'uncommon', 'rare'] as const).map(sig)).size).toBe(4)
+  })
+
+  test('a rare Pokémon gets a shine sweep masked to its sprite, only while moving', async () => {
+    const moving = spriteSvg({ base64: 'AAAA', bounds: box, size: 80, animate: true, owner: { rarity: 'rare' } })
+    expect(moving).toMatch(/<mask id="au-m-[^"]+" style="mask-type:alpha"/)
+    const sweep = /class="au-p au-sweep"/
+    expect(moving).toMatch(sweep)
+    expect(spriteSvg({ base64: 'AAAA', bounds: box, size: 80, animate: false, owner: { rarity: 'rare' } })).not.toMatch(sweep)
+    expect(spriteSvg({ base64: 'AAAA', bounds: box, size: 80, animate: true, owner: { rarity: 'common' } })).not.toMatch(sweep)
+  })
+
+  test('level extras: one shooting star per 10 levels, one twinkle per 5 between, staggered', async () => {
+    const over = auraOverlay(box, 0, ['fire'], true, { extras: { shooting: 3, twinkle: 2 } }).over
+    expect((over.match(/au-shoot/g) ?? []).length).toBe(3)
+    expect((over.match(/au-twinkle/g) ?? []).length).toBe(2)
+    const delays = [...over.matchAll(/au-shoot" style="[^"]*animation-delay:(-[\d.]+)s/g)].map(m => m[1])
+    expect(new Set(delays).size).toBe(3)
+    expect(auraOverlay(box, 0, ['fire'], true, { extras: { shooting: 0, twinkle: 0 } })).toEqual({ under: '', over: '', css: '' })
+  })
+
+  test('✦ marks by the name, and a toast when the aura grows', async () => {
+    const s = { ...newSave(), box: [{ ...newSave().box[0]!, phase: 'mon' as const, speciesId: 1, xp: DEX.growth['medium-slow'][12]! }] }
+    expect(titleOf(progress(s, DEX))).toBe('Bulbasaur Lv 12 ✦✦')
+    expect(eventToast({ kind: 'aura', tier: 3 }, DEX)).toBe('The aura grows ✦✦✦')
+  })
+})
+
 describe('session stats', () => {
   const tools = (over = {}) => ({ available: 275, mcp: 13, usedNames: Array.from({ length: 13 }, (_, i) => `t${i}`), calls: 41, seeded: true, ...over })
 
@@ -237,7 +336,7 @@ describe('legendary star and dex text', () => {
     expect(titleOf(progress(egg, DEX))).toBe('Egg Lv 1 ★')
     expect(titleOf(progress(newSave(), DEX))).toBe('Egg Lv 1')
     const mewtwo = { ...base, box: [{ ...base.box[0]!, phase: 'mon' as const, speciesId: 150, xp: DEX.growth.slow[10]! }] }
-    expect(titleOf(progress(mewtwo, DEX))).toBe('Mewtwo Lv 10 ★')
+    expect(titleOf(progress(mewtwo, DEX))).toBe('Mewtwo Lv 10 ★ ✦')
   })
 
   test('!hint lists the dex command', async () => {
