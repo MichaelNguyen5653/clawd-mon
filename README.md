@@ -16,11 +16,26 @@ Private repo → collaborators only:
 
 - Accept the GitHub invite. Git must reach the repo (`gh auth login`, SSH key, or Git Credential Manager). Test: `git clone https://github.com/MichaelNguyen5653/clawd-mon.git`.
 - Short form fails → full URL: `claude plugin marketplace add https://github.com/MichaelNguyen5653/clawd-mon.git`.
-- Background auto-update needs `GITHUB_TOKEN` (or `GH_TOKEN`) with read access. Without it: `claude plugin marketplace update clawd-mon`, then restart.
 
 One save across all sessions (`$.store`). No machine paths; scope = install scope.
 
 Needs a Claude Code build with function hooks (plugin `modules`). Desktop draws the sprite as SVG; terminal uses the Image element (kitty graphics, e.g. kitty/Ghostty), alt text elsewhere.
+
+## Update
+
+Auto-update is **off** by default for user-added marketplaces. Turn it on once per machine:
+
+1. `/plugin` → **Marketplaces** → **clawd-mon** → **Enable auto-update**.
+2. Runs up to 10 min after the first message of a session. New version loads on `/reload-plugins` or next launch.
+
+Off when `DISABLE_UPDATES`, `DISABLE_AUTOUPDATER` or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set, unless `FORCE_AUTOUPDATE_PLUGINS=1`. Private repo: `gh auth login`, then `gh auth setup-git` (`GITHUB_TOKEN` alone does not authenticate the background check).
+
+Manual update, then restart:
+
+```bash
+claude plugin marketplace update clawd-mon
+claude plugin update clawd-mon@clawd-mon
+```
 
 ## Rules
 
